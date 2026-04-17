@@ -9,6 +9,13 @@ PageIndex 是一个 **向量无关、基于推理的 RAG 系统**，用于长文
 - 无分块：文档组织为自然章节
 - 人类式检索：模拟专家导航和提取知识的方式
 
+### v1.1 新增特性
+
+- **采购类型分类**：货物类/服务类区分，评分项按类型适用
+- **权重差异化配置**：符合财政部87号令（货物价格30-50分，服务10-30分）
+- **政策性评分项**：中小企业声明函识别，符合财库〔2020〕46号
+- **API向后兼容**：所有新增参数使用默认值，现有调用无需修改
+
 ## 核心模块
 
 ### 1. PageIndex 树结构索引 (`pageindex/page_index.py`)
@@ -22,9 +29,22 @@ PageIndex 是一个 **向量无关、基于推理的 RAG 系统**，用于长文
 - **工作区持久化**：索引缓存避免重复生成
 
 ### 3. 采购评分项知识库 (`pageindex/procurement_knowledge.py`)
-- 预定义 9 种评分项映射（人员配备、类似业绩、设备能力等）
-- 标题关键词 + 证明材料关键词映射
-- 排除关键词机制（过滤偏离表等）
+
+v1.1 增强功能：
+- **采购类型分类**：`ProcurementType` 枚举（货物类/服务类）
+- **类型配置**：`PROCUREMENT_TYPE_KNOWLEDGE` 存储类型权重范围
+- **10种评分项**：人员配备、类似业绩、设备能力、企业资质、技术方案、商务方案、报价响应、财务状况、信誉荣誉、中小企业声明函
+- **权重差异化**：`weight_range` 字段按类型配置权重范围
+- **标题关键词 + 证明材料关键词映射**
+- **排除关键词机制**：过滤偏离表等
+
+新增方法：
+- `get_procurement_type_config()`: 获取类型配置
+- `get_requirements_for_type()`: 获取类型适用评分项
+- `get_weight_info()`: 获取权重范围
+- `validate_weights()`: 验证权重配置合规
+- `get_policy_requirements()`: 获取政策性评分项
+- `check_policy_compliance()`: 政策合规检查
 
 ### 4. 知识库构建工具 (`pageindex/procurement_kb_builder.py`)
 - `TenderParser`：从采购文件提取评分项
@@ -46,6 +66,7 @@ python run_pageindex.py --pdf_path /path/to/document.pdf
 
 ```python
 from pageindex.vision_pageindex import VisionPageIndexClient
+from pageindex.procurement_knowledge import ProcurementType
 
 # 创建客户端（workspace 持久化索引）
 client = VisionPageIndexClient(
@@ -62,6 +83,51 @@ doc_id = client.create_vision_index(
 # 扩展检索（推荐）
 result = client.retrieve_with_expansion(doc_id, "人员配备")
 # 输出：87-89页（标题页87 + 证明材料页88-89）
+
+# v1.1 新增：按采购类型过滤检索
+result = client.retrieve_with_expansion(
+    doc_id, "设备能力", 
+    procurement_type="货物类"  # 仅检索货物类评分项
+)
+```
+
+### 采购类型分类使用（v1.1）
+
+```python
+from pageindex.procurement_knowledge import ProcurementKnowledgeBase, ProcurementType
+
+kb = ProcurementKnowledgeBase()
+
+# 查看采购类型
+print(kb.get_all_procurement_types())  # [GOODS, SERVICES]
+
+# 查看类型关键评分项
+print(kb.get_requirements_for_type(ProcurementType.GOODS))  # ['设备能力', '企业资质', '报价响应']
+print(kb.get_requirements_for_type(ProcurementType.SERVICES))  # ['人员配备', '类似业绩', '技术方案']
+
+# 查看权重差异（财政部87号令）
+print(kb.get_weight_info("报价响应", ProcurementType.GOODS))  # {'min': 30, 'max': 50}
+print(kb.get_weight_info("报价响应", ProcurementType.SERVICES))  # {'min': 10, 'max': 30}
+
+# 验证权重配置
+config = {"报价响应": 20, "技术方案": 30, "人员配备": 15, ...}
+result = kb.validate_weights(ProcurementType.SERVICES, config)
+print(result["is_valid"])  # True/False
+```
+
+### 政策性评分项使用（v1.1）
+
+```python
+# 查看政策性评分项
+print(kb.get_policy_requirements())  # ['中小企业声明函']
+
+# 查看政策详情
+print(kb.get_policy_info("中小企业声明函"))
+# {'policy_type': '中小企业扶持', 'policy_reference': '财库〔2020〕46号', ...}
+
+# 政策合规检查
+print(kb.check_policy_compliance("中小企业声明函"))
+# {'is_policy': True, 'compliance_notes': ['小微企业享受6-10%价格扣除优惠', ...]}
 ```
 
 ### Agent 检索（OpenAI Agents SDK）
@@ -121,6 +187,33 @@ client = VisionPageIndexClient(
 
 传统关键词检索会漏检证明材料页。
 
+### v1.1 类型分类原理
+
+财政部87号令规定货物类和服务类评分权重不同：
+
+| 采购类型 | 价格权重 | 关键评分项 |
+|---------|---------|-----------|
+| 货物类 | 30-50% | 设备能力、报价响应、企业资质 |
+| 服务类 | 10-30% | 人员配备、技术方案、类似业绩 |
+
+知识库按类型配置：
+```python
+"报价响应": {
+    "procurement_types": [GOODS, SERVICES],  # 通用
+    "weight_range": {
+        GOODS: {"min": 30, "max": 50},
+        SERVICES: {"min": 10, "max": 30}
+    }
+}
+
+"人员配备": {
+    "procurement_types": [SERVICES],  # 服务类专用
+    "weight_range": {
+        SERVICES: {"min": 10, "max": 25}
+    }
+}
+```
+
 ### 解决方案
 
 知识库记录评分项与证明材料的映射：
@@ -128,6 +221,8 @@ client = VisionPageIndexClient(
 ```json
 {
   "人员配备": {
+    "procurement_types": ["服务类"],
+    "weight_range": {"服务类": {"min": 10, "max": 25}},
     "title_keywords": ["人员配备", "人员配置"],
     "material_types": {
       "操作证": {"keywords": ["操作手合格证", "无人机操作证"]},
@@ -141,6 +236,7 @@ client = VisionPageIndexClient(
 1. 定位标题页（搜索评分项关键词）
 2. 扫描证明材料页（搜索材料关键词）
 3. 合并完整范围
+4. （v1.1新增）按采购类型过滤
 
 ### 扩展检索 API
 
@@ -214,8 +310,8 @@ result = discovery.discover_from_summaries(
 ```
 pageindex/
 ├── page_index.py           # 树结构索引
-├── vision_pageindex.py     # 视觉检索 + Agent
-├── procurement_knowledge.py # 评分项知识库
+├── vision_pageindex.py     # 视觉检索 + Agent（v1.1 支持类型参数）
+├── procurement_knowledge.py # 评分项知识库（v1.1 类型分类 + 权重配置）
 ├── procurement_kb_builder.py # 知识库构建工具
 ├── client.py               # API 客户端
 ├── retrieve.py             # 检索函数
@@ -224,6 +320,7 @@ pageindex/
 docs/
 ├── VISION_PAGEINDEX_USAGE.md    # 视觉检索使用指南
 ├── PROCUREMENT_KB_BUILDING.md   # 知识库企业落地方案
+├── PROCUREMENT_KB_EVALUATION.md # v1.1 系统评估（评分 6.8）
 
 examples/
 ├── example_vision_retrieval.py  # Agent 检索示例
@@ -231,6 +328,7 @@ examples/
 
 tests/
 ├── test_procurement_kb.py       # 知识库测试
+├── test_procurement_type.py     # v1.1 类型分类测试（62个）
 ```
 
 ## 常见问题
@@ -242,6 +340,39 @@ A: 证明材料页不含评分项关键词。使用 `retrieve_with_expansion()` 
 ### Q: 模型调用报错 "model does not exist"？
 
 A: 检查模型名称格式和 base_url 配置。阿里云需要设置正确的 base_url。
+
+### Q: 如何按采购类型过滤检索？（v1.1）
+
+A: 使用 `procurement_type` 参数：
+```python
+# 仅检索货物类评分项
+result = client.retrieve_with_expansion(doc_id, "设备", procurement_type="货物类")
+
+# 仅检索服务类评分项
+result = client.retrieve_with_expansion(doc_id, "人员", procurement_type="服务类")
+```
+
+### Q: 如何验证权重配置是否符合87号令？（v1.1）
+
+A: 使用 `validate_weights()` 方法：
+```python
+config = {"报价响应": 20, "技术方案": 30, "人员配备": 15, ...}
+result = kb.validate_weights(ProcurementType.SERVICES, config)
+if not result["is_valid"]:
+    print("问题:", result["issues"])
+```
+
+### Q: 如何检测中小企业声明函？（v1.1）
+
+A: 使用政策性评分项方法：
+```python
+# 检索中小企业声明函
+result = client.retrieve_with_expansion(doc_id, "中小企业声明函")
+
+# 获取政策信息
+info = kb.get_policy_info("中小企业声明函")
+print("价格扣除:", info["price_deduction_range"])  # 6-10%
+```
 
 ### Q: 如何添加新的评分项类型？
 
@@ -259,4 +390,11 @@ enricher.add_material_type(
 
 - [视觉检索使用指南](docs/VISION_PAGEINDEX_USAGE.md)
 - [知识库企业落地方案](docs/PROCUREMENT_KB_BUILDING.md)
+- [系统评估文档](docs/PROCUREMENT_KB_EVALUATION.md) - v1.1 综合评分 6.8
 - [PageIndex 官方文档](https://docs.pageindex.ai)
+
+---
+
+**版本记录：**
+- v1.0: 基础知识库（9种评分项）
+- v1.1: 类型分类 + 权重差异化 + 政策性评分项（2026-04-17）
