@@ -1,0 +1,18 @@
+{
+  "workspace": "PageIndex-clean",
+  "workflow": {
+    "research": true,
+    "commit_docs": true
+  },
+  "models": {
+    "researcher": "sonnet",
+    "synthesizer": "sonnet",
+    "roadmapper": "sonnet",
+    "planner": "sonnet",
+    "executor": "sonnet"
+  },
+  "commit_conventions": {
+    "format": "<type>: <description>",
+    "types": ["feat", "fix", "refactor", "docs", "test", "chore", "perf", "ci"]
+  }
+}

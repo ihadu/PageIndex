@@ -853,7 +853,8 @@ class VisionPageIndexClient(PageIndexClient):
         doc_id: str,
         query: str,
         max_images: int = 10,
-        knowledge_base: ProcurementKnowledgeBase = None
+        knowledge_base: ProcurementKnowledgeBase = None,
+        procurement_type: str = None  # 新增：采购类型过滤
     ) -> Dict[str, Any]:
         """
         多轮扩展检索：标题页 + 证明材料页自动合并
@@ -869,11 +870,16 @@ class VisionPageIndexClient(PageIndexClient):
             query: 用户查询（如"人员配备"、"类似业绩"）
             max_images: 最大图片数（用于VLM处理）
             knowledge_base: 自定义知识库（默认使用内置）
+            procurement_type: 采购类型过滤（可选）
+                             None = 不过滤（默认）
+                             "货物类" = 仅检索货物类评分项
+                             "服务类" = 仅检索服务类评分项
 
         Returns:
             {
                 'query': 查询文本,
                 'requirement_type': 评分项类型,
+                'procurement_type': 采购类型,
                 'page_ranges': 合并后的页码范围,
                 'title_pages': 标题页列表,
                 'material_pages': 证明材料页列表,
@@ -893,15 +899,28 @@ class VisionPageIndexClient(PageIndexClient):
 
         max_page = max(page_summaries.keys())
 
-        # Step 1: 解析用户查询意图
-        intent = kb.parse_intent(query)
+        # 导入 ProcurementType 用于类型转换
+        from .procurement_knowledge import ProcurementType
+
+        # 转换 procurement_type 参数
+        proc_type_enum = None
+        if procurement_type:
+            if procurement_type == "货物类":
+                proc_type_enum = ProcurementType.GOODS
+            elif procurement_type == "服务类":
+                proc_type_enum = ProcurementType.SERVICES
+            else:
+                logger.warning(f"未知的采购类型: {procurement_type}, 将忽略类型过滤")
+
+        # Step 1: 解析用户查询意图（支持类型过滤）
+        intent = kb.parse_intent(query, procurement_type=proc_type_enum)
         requirement_type = intent.get('requirement_type')
         title_keywords = intent.get('title_keywords', [])
         material_types = intent.get('material_types', {})
         expansion_rule = intent.get('page_expansion_rule', {})
         confidence = intent.get('confidence', 0)
 
-        logger.info(f"意图解析: requirement_type={requirement_type}, confidence={confidence}")
+        logger.info(f"意图解析: requirement_type={requirement_type}, procurement_type={procurement_type}, confidence={confidence}")
 
         # Step 2: 定位标题页（优先精确匹配，排除汇总表）
         title_pages = []
@@ -1070,6 +1089,7 @@ class VisionPageIndexClient(PageIndexClient):
         return {
             'query': query,
             'requirement_type': requirement_type,
+            'procurement_type': procurement_type,  # 新增：采购类型
             'primary_title_page': primary_title_page,  # 主要标题页（精确匹配）
             'title_pages': title_pages,  # 所有匹配的标题页
             'material_pages': material_pages,  # 证明材料页

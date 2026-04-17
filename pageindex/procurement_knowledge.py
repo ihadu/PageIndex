@@ -14,15 +14,55 @@
 """
 
 from typing import Dict, List, Optional
+from enum import Enum
 import re
+
+
+# ============== 采购类型枚举 ==============
+
+class ProcurementType(str, Enum):
+    """
+    采购类型枚举
+
+    财政部87号令规定货物类和服务类评分权重不同：
+    - 货物类：价格权重30-50%，设备能力是关键评分项
+    - 服务类：价格权重10-30%，人员配备是关键评分项
+    """
+    GOODS = "货物类"
+    SERVICES = "服务类"
+
+
+# ============== 采购类型配置 ==============
+
+PROCUREMENT_TYPE_KNOWLEDGE = {
+    ProcurementType.GOODS: {
+        "description": "货物采购项目（设备、物资、产品等）",
+        "price_weight_range": {"min": 30, "max": 50},
+        "key_requirements": ["设备能力", "企业资质", "报价响应"],
+        "typical_materials": ["发票", "质量证明", "设备清单"],
+        "evaluation_focus": "性价比、质量证明、设备配置",
+    },
+    ProcurementType.SERVICES: {
+        "description": "服务采购项目（技术服务、咨询服务等）",
+        "price_weight_range": {"min": 10, "max": 30},
+        "key_requirements": ["人员配备", "类似业绩", "技术方案"],
+        "typical_materials": ["合同", "业绩证明", "人员证书"],
+        "evaluation_focus": "人员资质、业绩经验、方案质量",
+    },
+}
 
 
 # ============== 采购评分项标准知识库 ==============
 
 PROCUREMENT_REQUIREMENTS_KNOWLEDGE = {
-    # 人员类评分项
+    # 人员类评分项（服务类专用）
     "人员配备": {
         "category": "人员类",
+        "procurement_types": [ProcurementType.SERVICES],  # 服务类专用
+        "weight_range": {
+            ProcurementType.GOODS: None,  # 货物类不适用
+            ProcurementType.SERVICES: {"min": 10, "max": 25},  # 服务类: 10-25分
+        },
         "description": "项目人员配置与资质证明",
         "title_keywords": [
             "人员配备", "人员配置", "作业人员", "人员名单",
@@ -63,9 +103,14 @@ PROCUREMENT_REQUIREMENTS_KNOWLEDGE = {
         }
     },
 
-    # 业绩类评分项
+    # 业绩类评分项（通用）
     "类似业绩": {
         "category": "业绩类",
+        "procurement_types": [ProcurementType.GOODS, ProcurementType.SERVICES],  # 通用
+        "weight_range": {
+            ProcurementType.GOODS: {"min": 5, "max": 10},  # 货物类: 5-10分
+            ProcurementType.SERVICES: {"min": 10, "max": 20},  # 服务类: 10-20分
+        },
         "description": "供应商同类项目业绩证明",
         "title_keywords": [
             "类似业绩", "业绩证明", "业绩材料", "同类业绩",
@@ -105,9 +150,14 @@ PROCUREMENT_REQUIREMENTS_KNOWLEDGE = {
         }
     },
 
-    # 设备类评分项
+    # 设备类评分项（货物类专用）
     "设备能力": {
         "category": "设备类",
+        "procurement_types": [ProcurementType.GOODS],  # 货物类专用
+        "weight_range": {
+            ProcurementType.GOODS: {"min": 15, "max": 25},  # 货物类: 15-25分（技术指标的一部分）
+            ProcurementType.SERVICES: None,  # 服务类不适用
+        },
         "description": "项目设备配置与投入证明",
         "title_keywords": [
             "设备能力", "设备配置", "设备投入", "设备清单",
@@ -139,9 +189,14 @@ PROCUREMENT_REQUIREMENTS_KNOWLEDGE = {
         },
     },
 
-    # 资质类评分项
+    # 资质类评分项（通用）
     "企业资质": {
         "category": "资质类",
+        "procurement_types": [ProcurementType.GOODS, ProcurementType.SERVICES],  # 通用
+        "weight_range": {
+            ProcurementType.GOODS: {"min": 5, "max": 10},  # 货物类: 5-10分
+            ProcurementType.SERVICES: {"min": 5, "max": 15},  # 服务类: 5-15分
+        },
         "description": "企业资质证书与证明",
         "title_keywords": [
             "企业资质", "资质证书", "资质证明", "公司资质",
@@ -168,9 +223,14 @@ PROCUREMENT_REQUIREMENTS_KNOWLEDGE = {
         },
     },
 
-    # 技术方案类评分项
+    # 技术方案类评分项（服务类专用）
     "技术方案": {
         "category": "技术类",
+        "procurement_types": [ProcurementType.SERVICES],  # 服务类专用
+        "weight_range": {
+            ProcurementType.GOODS: None,  # 货物类不适用
+            ProcurementType.SERVICES: {"min": 20, "max": 40},  # 服务类: 20-40分
+        },
         "description": "技术服务方案与技术响应",
         "title_keywords": [
             "技术方案", "技术服务方案", "实施方案", "作业方案",
@@ -201,9 +261,14 @@ PROCUREMENT_REQUIREMENTS_KNOWLEDGE = {
         },
     },
 
-    # 商务方案类评分项
+    # 商务方案类评分项（通用）
     "商务方案": {
         "category": "商务类",
+        "procurement_types": [ProcurementType.GOODS, ProcurementType.SERVICES],  # 通用
+        "weight_range": {
+            ProcurementType.GOODS: {"min": 5, "max": 15},  # 货物类: 5-15分（售后服务）
+            ProcurementType.SERVICES: {"min": 5, "max": 10},  # 服务类: 5-10分
+        },
         "description": "商务响应与商务条件",
         "title_keywords": [
             "商务方案", "商务响应", "商务部分", "商务偏离表",
@@ -226,9 +291,14 @@ PROCUREMENT_REQUIREMENTS_KNOWLEDGE = {
         },
     },
 
-    # 价格类评分项（通常单页）
+    # 价格类评分项（通用，但权重差异显著）
     "报价响应": {
         "category": "价格类",
+        "procurement_types": [ProcurementType.GOODS, ProcurementType.SERVICES],  # 通用（权重差异）
+        "weight_range": {
+            ProcurementType.GOODS: {"min": 30, "max": 50},  # 货物类: 30-50分（87号令规定）
+            ProcurementType.SERVICES: {"min": 10, "max": 30},  # 服务类: 10-30分（87号令规定）
+        },
         "description": "报价单与价格响应",
         "title_keywords": [
             "报价", "报价表", "报价单", "价格表", "报价响应",
@@ -246,9 +316,14 @@ PROCUREMENT_REQUIREMENTS_KNOWLEDGE = {
         },
     },
 
-    # 财务类评分项
+    # 财务类评分项（通用）
     "财务状况": {
         "category": "财务类",
+        "procurement_types": [ProcurementType.GOODS, ProcurementType.SERVICES],  # 通用
+        "weight_range": {
+            ProcurementType.GOODS: {"min": 5, "max": 10},  # 货物类: 5-10分
+            ProcurementType.SERVICES: {"min": 5, "max": 10},  # 服务类: 5-10分
+        },
         "description": "企业财务状况证明",
         "title_keywords": [
             "财务状况", "财务报表", "财务证明", "财务报告",
@@ -271,9 +346,14 @@ PROCUREMENT_REQUIREMENTS_KNOWLEDGE = {
         },
     },
 
-    # 信誉荣誉类评分项
+    # 信誉荣誉类评分项（通用）
     "信誉荣誉": {
         "category": "信誉类",
+        "procurement_types": [ProcurementType.GOODS, ProcurementType.SERVICES],  # 通用
+        "weight_range": {
+            ProcurementType.GOODS: {"min": 3, "max": 8},  # 货物类: 3-8分（可选）
+            ProcurementType.SERVICES: {"min": 5, "max": 10},  # 服务类: 5-10分
+        },
         "description": "企业信誉与荣誉证明",
         "title_keywords": [
             "信誉", "荣誉", "信誉状况", "荣誉证明", "荣誉证书",
@@ -293,6 +373,47 @@ PROCUREMENT_REQUIREMENTS_KNOWLEDGE = {
             "direction": "forward",
             "max_pages": 5,
         },
+    },
+
+    # ============== 政策性评分项 ==============
+
+    # 中小企业声明函（财库〔2020〕46号）
+    "中小企业声明函": {
+        "category": "政策类",
+        "procurement_types": [ProcurementType.GOODS, ProcurementType.SERVICES],  # 通用
+        "weight_range": {
+            ProcurementType.GOODS: {"min": 3, "max": 5},  # 货物类: 3-5分（价格扣除6-10%转化）
+            ProcurementType.SERVICES: {"min": 3, "max": 5},  # 服务类: 3-5分
+        },
+        "description": "中小企业身份声明函，享受政策优惠加分",
+        "title_keywords": [
+            "中小企业声明函", "中小企业声明", "小微企业声明",
+            "中型企业声明", "企业类型声明", "中小企业认定"
+        ],
+        "material_types": {
+            "声明函": {
+                "keywords": ["从业人员", "营业收入", "资产总额", "所属行业", "企业规模"],
+                "description": "企业规模声明内容",
+                "is_policy_doc": True,  # 政策性文件标记
+                "single_page": True,  # 单页结构
+            },
+            "营业执照": {
+                "keywords": ["营业执照", "工商执照", "企业法人营业执照"],
+                "description": "佐证企业类型的营业执照",
+            },
+        },
+        "page_expansion_rule": {
+            "direction": "none",  # 单页，不扩展
+            "max_pages": 1,
+        },
+        "is_policy_requirement": True,  # 政策性评分项标记
+        "policy_type": "中小企业扶持",  # 政策类型
+        "policy_reference": "财库〔2020〕46号",  # 政策依据
+        "price_deduction_range": {"min": 6, "max": 10},  # 价格扣除比例（%）
+        "examples": {
+            "title_page": "中小企业声明函",
+            "material_pages": "单页声明，无需扩展",
+        }
     },
 }
 
@@ -317,6 +438,9 @@ class ProcurementKnowledgeBase:
         if custom_config:
             self.knowledge.update(custom_config)
 
+        # 加载类型配置
+        self.type_config = PROCUREMENT_TYPE_KNOWLEDGE
+
         # 构建关键词索引（用于快速匹配）
         self._build_keyword_index()
 
@@ -327,12 +451,16 @@ class ProcurementKnowledgeBase:
             for kw in config.get("title_keywords", []):
                 self.keyword_index[kw] = req_type
 
-    def parse_intent(self, query: str) -> Dict:
+    def parse_intent(self, query: str, procurement_type: ProcurementType = None) -> Dict:
         """
         解析用户查询的评分项意图
 
         Args:
             query: 用户查询（如"人员配备"、"类似业绩"等）
+            procurement_type: 采购类型过滤（可选）
+                             None = 不过滤（默认，保持向后兼容）
+                             ProcurementType.GOODS = 仅返回货物类评分项
+                             ProcurementType.SERVICES = 仅返回服务类评分项
 
         Returns:
             {
@@ -352,6 +480,13 @@ class ProcurementKnowledgeBase:
             score = 0
             matched_keywords = []
 
+            # 类型过滤：检查评分项是否适用于指定类型
+            if procurement_type:
+                applicable_types = config.get("procurement_types", [])
+                # 如果评分项有类型限制，检查是否匹配
+                if applicable_types and procurement_type not in applicable_types:
+                    continue  # 跳过不匹配的评分项
+
             # 检查标题关键词匹配
             for kw in config.get("title_keywords", []):
                 if kw in query:
@@ -367,6 +502,7 @@ class ProcurementKnowledgeBase:
                         "requirement_type": req_type,
                         "category": config.get("category"),
                         "description": config.get("description"),
+                        "procurement_types": config.get("procurement_types", []),  # 新增
                         "title_keywords": config.get("title_keywords", []),
                         "matched_keywords": matched_keywords,
                         "exclude_keywords": config.get("exclude_keywords", []),  # 添加排除词
@@ -382,6 +518,7 @@ class ProcurementKnowledgeBase:
         return {
             "requirement_type": "unknown",
             "category": "未知",
+            "procurement_types": [],
             "title_keywords": [query],  # 用查询词作为关键词
             "matched_keywords": [],
             "material_types": {},
@@ -459,9 +596,31 @@ class ProcurementKnowledgeBase:
             "matched_keywords": [],
         }
 
-    def get_all_requirement_types(self) -> List[str]:
-        """获取所有评分项类型"""
-        return list(self.knowledge.keys())
+    def get_all_requirement_types(self, procurement_type: ProcurementType = None) -> List[str]:
+        """
+        获取所有评分项类型名称
+
+        Args:
+            procurement_type: 采购类型过滤（可选）
+                             None = 返回全部（默认，保持兼容）
+
+        Returns:
+            List[str]: 评分项类型名称列表
+        """
+        all_types = list(self.knowledge.keys())
+
+        if procurement_type:
+            # 过滤：仅返回该类型适用的评分项
+            filtered = []
+            for req_type in all_types:
+                requirement = self.knowledge.get(req_type, {})
+                applicable_types = requirement.get("procurement_types", [])
+                # 无类型限制或匹配指定类型
+                if not applicable_types or procurement_type in applicable_types:
+                    filtered.append(req_type)
+            return filtered
+
+        return all_types
 
     def get_category_requirements(self, category: str) -> List[str]:
         """获取某类别下的所有评分项"""
@@ -469,6 +628,207 @@ class ProcurementKnowledgeBase:
             req_type for req_type, config in self.knowledge.items()
             if config.get("category") == category
         ]
+
+    def get_procurement_type_config(self, procurement_type: ProcurementType) -> Dict:
+        """
+        获取采购类型配置信息
+
+        Args:
+            procurement_type: 采购类型枚举值
+
+        Returns:
+            Dict: 类型配置（description, price_weight_range, key_requirements等）
+        """
+        return PROCUREMENT_TYPE_KNOWLEDGE.get(procurement_type, {})
+
+    def get_requirements_for_type(self, procurement_type: ProcurementType) -> List[str]:
+        """
+        获取指定采购类型适用的评分项列表
+
+        Args:
+            procurement_type: 采购类型枚举值
+
+        Returns:
+            List[str]: 该类型适用的评分项名称列表
+        """
+        config = self.get_procurement_type_config(procurement_type)
+        return config.get("key_requirements", [])
+
+    def get_all_procurement_types(self) -> List[ProcurementType]:
+        """
+        获取所有采购类型枚举值
+
+        Returns:
+            List[ProcurementType]: 所有采购类型列表
+        """
+        return list(ProcurementType)
+
+    def get_weight_info(self, requirement_type: str, procurement_type: ProcurementType) -> Optional[Dict]:
+        """
+        获取评分项在指定采购类型下的权重范围
+
+        Args:
+            requirement_type: 评分项类型名称
+            procurement_type: 采购类型枚举值
+
+        Returns:
+            Dict: 权重范围 {"min": 10, "max": 25} 或 None（不适用）
+        """
+        config = self.knowledge.get(requirement_type, {})
+        weight_range = config.get("weight_range", {})
+        return weight_range.get(procurement_type)
+
+    def get_all_weights_for_type(self, procurement_type: ProcurementType) -> Dict[str, Optional[Dict]]:
+        """
+        获取指定采购类型下所有评分项的权重范围
+
+        Args:
+            procurement_type: 采购类型枚举值
+
+        Returns:
+            Dict: {评分项名称: {"min": x, "max": y} 或 None}
+        """
+        weights = {}
+        for req_type, config in self.knowledge.items():
+            weight_range = config.get("weight_range", {})
+            weights[req_type] = weight_range.get(procurement_type)
+        return weights
+
+    def validate_weights(self, procurement_type: ProcurementType, weight_config: Dict[str, int]) -> Dict:
+        """
+        验证权重配置是否合规
+
+        Args:
+            procurement_type: 采购类型枚举值
+            weight_config: {评分项名称: 分值} 配置
+
+        Returns:
+            Dict: {
+                "is_valid": True/False,
+                "total": 总分值,
+                "issues": ["问题列表"],
+                "warnings": ["警告列表"]
+            }
+        """
+        issues = []
+        warnings = []
+        total = 0
+
+        for req_type, weight in weight_config.items():
+            weight_range = self.get_weight_info(req_type, procurement_type)
+
+            if weight_range is None:
+                # 评分项不适用于该类型
+                issues.append(f"{req_type} 不适用于{procurement_type.value}")
+                continue
+
+            total += weight
+
+            if weight_range:
+                # 有权重范围限制
+                if weight < weight_range["min"]:
+                    issues.append(f"{req_type} 权重{weight}低于最小值{weight_range['min']}")
+                elif weight > weight_range["max"]:
+                    issues.append(f"{req_type} 权重{weight}高于最大值{weight_range['max']}")
+                elif weight == weight_range["max"]:
+                    warnings.append(f"{req_type} 权重达到上限{weight_range['max']}")
+
+        # 总分应为100分
+        if total != 100:
+            issues.append(f"权重总和{total}不等于100分")
+
+        return {
+            "is_valid": len(issues) == 0,
+            "total": total,
+            "issues": issues,
+            "warnings": warnings,
+        }
+
+    def get_policy_requirements(self, procurement_type: ProcurementType = None) -> List[str]:
+        """
+        获取政策性评分项列表
+
+        Args:
+            procurement_type: 采购类型过滤（可选）
+                             None = 返回全部政策性评分项
+
+        Returns:
+            List[str]: 政策性评分项名称列表
+        """
+        policy_reqs = []
+        for req_type, config in self.knowledge.items():
+            if config.get("is_policy_requirement"):
+                if procurement_type:
+                    applicable_types = config.get("procurement_types", [])
+                    if applicable_types and procurement_type not in applicable_types:
+                        continue
+                policy_reqs.append(req_type)
+        return policy_reqs
+
+    def get_policy_info(self, requirement_type: str) -> Optional[Dict]:
+        """
+        获取政策性评分项详细信息
+
+        Args:
+            requirement_type: 评分项类型名称
+
+        Returns:
+            Dict: 政策信息（policy_type, policy_reference, price_deduction_range等）
+                  或 None（非政策性评分项）
+        """
+        config = self.knowledge.get(requirement_type, {})
+        if not config.get("is_policy_requirement"):
+            return None
+
+        return {
+            "policy_type": config.get("policy_type"),
+            "policy_reference": config.get("policy_reference"),
+            "price_deduction_range": config.get("price_deduction_range"),
+            "is_policy_doc": True,
+        }
+
+    def check_policy_compliance(self, requirement_type: str) -> Dict:
+        """
+        检查政策性评分项合规性
+
+        Args:
+            requirement_type: 评分项类型名称
+
+        Returns:
+            Dict: {
+                "is_policy": True/False,
+                "policy_type": "中小企业扶持",
+                "compliance_notes": ["注意事项列表"]
+            }
+        """
+        config = self.knowledge.get(requirement_type, {})
+        is_policy = config.get("is_policy_requirement", False)
+
+        if not is_policy:
+            return {
+                "is_policy": False,
+                "policy_type": None,
+                "compliance_notes": [],
+            }
+
+        notes = []
+        policy_type = config.get("policy_type")
+
+        # 根据政策类型添加合规提示
+        if policy_type == "中小企业扶持":
+            notes.extend([
+                "小微企业享受6%-10%价格扣除优惠",
+                "需核实从业人员、营业收入、资产总额是否符合小微企业标准",
+                "联合体投标需提供联合体协议",
+            ])
+
+        return {
+            "is_policy": True,
+            "policy_type": policy_type,
+            "policy_reference": config.get("policy_reference"),
+            "price_deduction_range": config.get("price_deduction_range"),
+            "compliance_notes": notes,
+        }
 
 
 # ============== 辅助函数 ==============
