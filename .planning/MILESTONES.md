@@ -27,13 +27,33 @@
 
 ## v1.1 — 政府采购场景增强
 
-**Status:** 🔄 In Progress
-**Started:** 2026-04-17
+**Status:** ✓ Complete
+**Date:** 2026-04-17
 
-### Goals
+### Shipped
 
-基于评估文档 PROCUREMENT_KB_EVALUATION.md 的改进计划。
+基于评估文档 PROCUREMENT_KB_EVALUATION.md 的改进计划：
 
-### Target Features
+- **TYPE-01**: 采购类型分类（ProcurementType 枚举）
+- **TYPE-02**: 权重差异化配置（weight_range 字段）
+- **POLICY-01**: 中小企业声明函识别
+- **COMPAT-01**: API向后兼容
+- **INT-01**: VisionPageIndex 类型参数
 
-待规划...
+### Validation
+
+- 新增测试: 62 个全部通过
+- 现有测试: 9 个全部通过（向后兼容验证）
+- 功能验证: 类型分类、权重验证、政策评分项识别 ✓
+
+---
+
+## v1.2 — 规划中
+
+**Status:** 📋 Planned
+
+### Potential Features
+
+- **POLICY-02**: 绿色产品认证（需品目清单数据）
+- **REGION-01**: 地区知识库差异化
+- **VALID-01**: 证明材料有效性检测
