@@ -2,10 +2,10 @@
 
 ## Current Position
 
-Phase: v1.1 Implementation Complete
+Phase: v1.2 Implementation In Progress
 Plan: —
-Status: Ready for milestone completion
-Last activity: 2026-04-17 — v1.1 features implemented and committed
+Status: v1.1 Archived, v1.2 code committed (af0231a), pending milestone completion
+Last activity: 2026-04-18 — v1.2 proof material detection enhancement
 
 ## Project Reference
 

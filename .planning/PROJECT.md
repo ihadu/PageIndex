@@ -10,46 +10,59 @@ PageIndex 是一个**向量无关、基于推理的 RAG 系统**，专门用于�
 
 **让评审专家快速定位评分项页码**——这是政府采购评审效率提升的关键需求。
 
-## Current Milestone: v1.1 货物/服务政府采购增强
+## Current Milestone: v1.2 证明材料页漏检修复
 
-**Goal:** 为货物类和服务类政府采购增加类型分类、权重差异配置和政策性评分项
+**Goal:** 修复证明材料页漏检问题，实现连续性追踪、双向搜索、人员信息特征检测
 
 **Target features:**
-- 采购类型分类（货物/服务）— 顶层架构增加类型分类
-- 权重差异配置 — 货物价格权重高（30-50%），服务人员权重高（10-25%）
-- 政策性评分项 — 小微企业声明函、绿色产品认证
+- 连续性追踪：追踪多页证明材料（合同条款页等）
+- 关键词分层：强关键词单独触发 + 弱关键词追踪使用
+- 停止条件检测：遇到新评分项标题自动停止
+- 双向搜索：bidirectional 模式支持向前搜索
+- 人员信息特征检测：person_info_pattern 检测多人列表
 
-**预估时间:** 1-2周
+**预估时间:** 1周（已提交代码，待正式归档）
 
 ## Requirements
 
 ### Validated
 
-<!-- 已验证的功能，从现有代码推断 -->
+<!-- 已验证的功能 -->
 
-- ✓ **基础树结构索引** — 从 PDF 生成层级树结构（类似目录） — v1.0
-- ✓ **视觉检索（VisionPageIndex）** — 直接处理 PDF 页面图片，支持扫描件 — v1.0
+**v1.0 基础版本：**
+- ✓ **基础树结构索引** — 从 PDF 生成层级树结构 — v1.0
+- ✓ **视觉检索（VisionPageIndex）** — 直接处理 PDF 页面图片 — v1.0
 - ✓ **多轮扩展检索** — 标题页 + 证明材料页自动合并 — v1.0
-- ✓ **采购评分项知识库** — 9种评分项映射（人员配备、类似业绩、设备能力等） — v1.0
-- ✓ **关键词排除机制** — 过滤偏离表、响应表等干扰页面 — v1.0
+- ✓ **采购评分项知识库** — 9种评分项映射 — v1.0
+- ✓ **关键词排除机制** — 过滤偏离表等干扰页面 — v1.0
 - ✓ **OpenAI Agents SDK 集成** — 支持 Chat Completions API — v1.0
-- ✓ **LiteLLM 兼容** — 支持阿里云 DashScope 等国产大模型 — v1.0
+- ✓ **LiteLLM 兼容** — 支持阿里云 DashScope — v1.0
 - ✓ **工作区持久化** — 索引缓存避免重复生成 — v1.0
-- ✓ **知识库构建工具** — TenderParser、KeywordDiscovery、KBValidator、KBManager、ExpertKBEnricher — v1.0
+- ✓ **知识库构建工具** — TenderParser、KeywordDiscovery 等 — v1.0
+
+**v1.1 政府采购增强：**
+- ✓ **TYPE-01**: 采购类型分类（货物类/服务类） — v1.1
+- ✓ **TYPE-02**: 评分项权重差异化配置（weight_range） — v1.1
+- ✓ **POLICY-01**: 中小企业声明函识别 — v1.1
+- ✓ **COMPAT-01**: API 向后兼容 — v1.1
+- ✓ **INT-01**: VisionPageIndex 类型参数 — v1.1
 
 ### Active
 
-<!-- v1.1 里程碑目标（基于研究建议调整） -->
+<!-- v1.2 里程碑目标 -->
 
-- [ ] **TYPE-01**: 系统支持采购类型分类（货物类/服务类）
-- [ ] **TYPE-02**: 评分项权重按采购类型差异化配置
-- [ ] **POLICY-01**: 新增政策性评分项（中小企业声明函）
+- [x] **连续性追踪** — `_should_continue_material()` 追踪多页证明材料（已提交）
+- [x] **关键词分层** — 强关键词单独触发 + 弱关键词追踪（已提交）
+- [x] **停止条件检测** — 遇到新评分项标题自动停止（已提交）
+- [x] **双向搜索** — bidirectional 模式支持向前搜索（已提交）
+- [x] **人员信息特征检测** — person_info_pattern 检测多人列表（已提交）
+- [x] **扩展范围增大** — max_pages 从 20 增加到 50（已提交）
 
 ### Deferred to v1.x
 
-<!-- 研究建议延后 -->
-
-- **POLICY-02 绿色产品认证** — 需品目清单数据库支持，延后到 v1.x
+- **POLICY-02 绿色产品认证** — 需品目清单数据库支持
+- **REGION-01 地区知识库差异化** — 各省采购规则差异
+- **VALID-01 证明材料有效性检测** — 证书有效期、公章检测
 
 ### Out of Scope
 
@@ -102,6 +115,10 @@ PageIndex 是一个**向量无关、基于推理的 RAG 系统**，专门用于�
 | 9种评分项与87号令对齐 | 符合法规框架，合规性好 | ✓ Good |
 | 排除词机制过滤偏离表 | 减少干扰页面，提高精准度 | ✓ Good |
 | 知识库静态存储 | 简单易用 | ⚠️ Revisit（需政策自动更新机制） |
+| ProcurementType 枚举顶层架构 | 符合财政部87号令分类 | ✓ Good — v1.1 |
+| weight_range 按类型配置 | 货物价格30-50%，服务10-30%合规 | ✓ Good — v1.1 |
+| 连续性追踪 + 弱关键词分层 | 解决合同条款页漏检 | ✓ Good — v1.2 |
+| bidirectional 双向搜索 | 证明材料可能在标题页之前 | ✓ Good — v1.2 |
 
 ## Evolution
 
@@ -121,4 +138,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-17 after milestone v1.1 initialization*
+*Last updated: 2026-04-18 after v1.1 milestone archived*

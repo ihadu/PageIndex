@@ -27,8 +27,9 @@
 
 ## v1.1 — 政府采购场景增强
 
-**Status:** ✓ Complete
+**Status:** ✓ Complete (Archived)
 **Date:** 2026-04-17
+**Archive:** `.planning/milestones/v1.1-ROADMAP.md`, `.planning/milestones/v1.1-REQUIREMENTS.md`
 
 ### Shipped
 
@@ -40,11 +41,11 @@
 - **COMPAT-01**: API向后兼容
 - **INT-01**: VisionPageIndex 类型参数
 
-### Validation
+### Stats
 
-- 新增测试: 62 个全部通过
-- 现有测试: 9 个全部通过（向后兼容验证）
-- 功能验证: 类型分类、权重验证、政策评分项识别 ✓
+- 新增代码: 2,045 lines
+- 新增测试: 62 个（全部通过）
+- Git range: 9febcb0 → 624296b
 
 ---
 
