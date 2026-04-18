@@ -69,6 +69,18 @@ PROCUREMENT_REQUIREMENTS_KNOWLEDGE = {
             "人员构成", "人员安排", "人员组织", "技术人员",
             "飞防作业队", "飞手配置", "操作人员"
         ],
+        # v1.2新增：证明材料关键词也可触发标题页定位（权重更高）
+        "material_as_title_keywords": [
+            "操作手合格证", "植保无人机操作证", "飞手证"
+        ],
+        # v1.2新增：人员信息特征检测（更本质的判断方式）
+        # 用于识别人员证明材料页面（包含多人个人信息）
+        "person_info_pattern": {
+            "core_fields": ["姓名", "性别", "出生日期"],  # 核心字段（必须包含）
+            "optional_fields": ["年龄", "身份证", "证书编号", "发证日期", "有效期"],  # 可选字段
+            "multi_person_indicators": ["位人员", "张证书", "人员名单", "共"],  # 多人列表标志
+            "min_field_count": 2,  # 至少匹配2个核心字段
+        },
         "material_types": {
             "操作证": {
                 "keywords": ["操作手合格证", "无人机操作证", "飞手证", "植保无人机操作证", "DJI操作证", "合格证"],
@@ -93,8 +105,9 @@ PROCUREMENT_REQUIREMENTS_KNOWLEDGE = {
             },
         },
         "page_expansion_rule": {
-            "direction": "forward",  # 向后扩展
-            "max_pages": 10,  # 最大扩展页数
+            "direction": "bidirectional",  # v1.2：人员配备证明材料可能在标题页之前
+            "max_pages": 15,  # 前后各扩展15页
+            "backward_pages": 10,  # 向前扩展10页
             "stop_conditions": ["新章节标题", "下一个评分项"],
         },
         "examples": {
@@ -122,11 +135,27 @@ PROCUREMENT_REQUIREMENTS_KNOWLEDGE = {
         ],
         "material_types": {
             "中标通知": {
-                "keywords": ["中标通知书", "成交通知书", "中标公告", "成交公告", "中标结果"],
+                "keywords": [
+                    "中标通知书", "成交通知书", "中标公告", "成交公告", "中标结果",
+                    # v1.2新增：关键词变体
+                    "中标（成交）通知书", "中标(成交)通知书", "中标成交通知书",
+                ],
                 "description": "项目中标/成交证明文件",
             },
             "合同": {
-                "keywords": ["政府采购合同", "服务合同", "采购合同", "合同书", "协议书"],
+                "keywords": [
+                    # 强关键词：明确标识合同首页
+                    "政府采购合同", "服务合同", "采购合同", "合同书", "协议书",
+                    "合同条款", "合同附件",
+                    # v1.2新增：补助协议等变体
+                    "补助协议", "采购协议", "服务协议",
+                ],
+                # 弱关键词：用于连续性追踪，不单独触发检测
+                "weak_keywords": [
+                    "条款页", "合同约定", "违约责任", "付款方式",
+                    "结算方式", "双方权利义务", "合同编号", "合同签署",
+                    "合同生效", "权利义务", "知识产权", "质量保证"
+                ],
                 "description": "项目合同文件",
                 "multi_page": True,
             },
@@ -141,7 +170,7 @@ PROCUREMENT_REQUIREMENTS_KNOWLEDGE = {
         },
         "page_expansion_rule": {
             "direction": "forward",
-            "max_pages": 20,  # 业绩材料可能较多页
+            "max_pages": 50,  # v1.2：业绩材料可能超过20页，放宽限制
             "stop_conditions": ["新评分项标题"],
         },
         "examples": {
@@ -301,8 +330,9 @@ PROCUREMENT_REQUIREMENTS_KNOWLEDGE = {
         },
         "description": "报价单与价格响应",
         "title_keywords": [
-            "报价", "报价表", "报价单", "价格表", "报价响应",
-            "报价文件", "分项报价"
+            # v1.2：移除通用词"报价"，避免误匹配合同条款页中的"报价表"
+            "报价表", "报价单", "价格表", "报价响应",
+            "报价文件", "分项报价", "报价一览表"
         ],
         "material_types": {
             "报价表": {
@@ -504,6 +534,8 @@ class ProcurementKnowledgeBase:
                         "description": config.get("description"),
                         "procurement_types": config.get("procurement_types", []),  # 新增
                         "title_keywords": config.get("title_keywords", []),
+                        "material_as_title_keywords": config.get("material_as_title_keywords", []),  # v1.2新增
+                        "person_info_pattern": config.get("person_info_pattern", {}),  # v1.2新增：人员信息特征检测
                         "matched_keywords": matched_keywords,
                         "exclude_keywords": config.get("exclude_keywords", []),  # 添加排除词
                         "material_types": config.get("material_types", {}),
@@ -621,6 +653,24 @@ class ProcurementKnowledgeBase:
             return filtered
 
         return all_types
+
+    def get_all_title_keywords(self, exclude_type: str = None) -> List[str]:
+        """
+        获取所有评分项的标题关键词（用于停止条件检测）
+
+        Args:
+            exclude_type: 要排除的评分项类型（当前正在检索的类型）
+
+        Returns:
+            List[str]: 所有标题关键词列表
+        """
+        all_keywords = []
+        for req_type, config in self.knowledge.items():
+            if req_type == exclude_type:
+                continue  # 排除当前评分项
+            title_keywords = config.get("title_keywords", [])
+            all_keywords.extend(title_keywords)
+        return all_keywords
 
     def get_category_requirements(self, category: str) -> List[str]:
         """获取某类别下的所有评分项"""

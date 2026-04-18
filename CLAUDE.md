@@ -16,6 +16,18 @@ PageIndex 是一个 **向量无关、基于推理的 RAG 系统**，用于长文
 - **政策性评分项**：中小企业声明函识别，符合财库〔2020〕46号
 - **API向后兼容**：所有新增参数使用默认值，现有调用无需修改
 
+### v1.2 新增特性（证明材料页漏检修复）
+
+- **连续性追踪**：`_should_continue_material` 方法追踪多页证明材料
+- **关键词分层**：强关键词（单独触发）+ 弱关键词（追踪使用）
+- **停止条件检测**：遇到新评分项标题时停止扫描
+- **上下文关键词误匹配检测**：防止合同条款页误触发停止
+- **双向搜索**：`bidirectional` 模式支持向前搜索（证明材料在标题页之前）
+- **标题开头优先**：摘要开头匹配的页面得分更高（真正的章节标题）
+- **章节标题页分离**：`title_pages`（章节标题）与 `material_title_pages`（证明材料标题）分开
+- **人员信息特征检测**：`person_info_pattern` 检测多人列表（姓名、性别、出生日期等）
+- **扩展范围增大**：`max_pages` 从 20 增加到 50，覆盖更长业绩材料
+
 ## 核心模块
 
 ### 1. PageIndex 树结构索引 (`pageindex/page_index.py`)
@@ -28,6 +40,12 @@ PageIndex 是一个 **向量无关、基于推理的 RAG 系统**，用于长文
 - **OpenAI Agents SDK 集成**：支持 Chat Completions API
 - **工作区持久化**：索引缓存避免重复生成
 
+v1.2 增强功能：
+- **连续性追踪**：`_should_continue_material()` 追踪多页证明材料
+- **人员信息检测**：`_check_person_info_pattern()` 检测多人列表特征
+- **双向搜索**：支持 `bidirectional` 扩展模式
+- **停止条件**：遇到新评分项标题自动停止扫描
+
 ### 3. 采购评分项知识库 (`pageindex/procurement_knowledge.py`)
 
 v1.1 增强功能：
@@ -38,6 +56,13 @@ v1.1 增强功能：
 - **标题关键词 + 证明材料关键词映射**
 - **排除关键词机制**：过滤偏离表等
 
+v1.2 增强功能：
+- **关键词分层**：强关键词（`keywords`）+ 弱关键词（`weak_keywords`）
+- **证明材料标题关键词**：`material_as_title_keywords`（如操作手合格证）
+- **人员信息特征配置**：`person_info_pattern`（姓名、性别、出生日期）
+- **双向扩展配置**：`direction: bidirectional` + `backward_pages`
+- **扩展范围增大**：`max_pages` 从 20 增加到 50
+
 新增方法：
 - `get_procurement_type_config()`: 获取类型配置
 - `get_requirements_for_type()`: 获取类型适用评分项
@@ -45,6 +70,7 @@ v1.1 增强功能：
 - `validate_weights()`: 验证权重配置合规
 - `get_policy_requirements()`: 获取政策性评分项
 - `check_policy_compliance()`: 政策合规检查
+- `get_all_title_keywords()`: v1.2新增，获取所有评分项标题关键词（用于停止条件）
 
 ### 4. 知识库构建工具 (`pageindex/procurement_kb_builder.py`)
 - `TenderParser`：从采购文件提取评分项
@@ -225,8 +251,17 @@ client = VisionPageIndexClient(
     "weight_range": {"服务类": {"min": 10, "max": 25}},
     "title_keywords": ["人员配备", "人员配置"],
     "material_types": {
-      "操作证": {"keywords": ["操作手合格证", "无人机操作证"]},
-      "健康证明": {"keywords": ["健康证", "体检证明"]}
+      "操作证": {"keywords": ["操作手合格证", "无人机操作证"], "multi_page": true}
+    },
+    "material_as_title_keywords": ["操作手合格证"],  // v1.2新增
+    "person_info_pattern": {  // v1.2新增
+      "core_fields": ["姓名", "性别", "出生日期"],
+      "min_field_count": 2
+    },
+    "page_expansion_rule": {
+      "direction": "bidirectional",  // v1.2新增：双向搜索
+      "max_pages": 50,  // v1.2增大
+      "backward_pages": 10
     }
   }
 }
@@ -235,8 +270,11 @@ client = VisionPageIndexClient(
 检索流程：
 1. 定位标题页（搜索评分项关键词）
 2. 扫描证明材料页（搜索材料关键词）
-3. 合并完整范围
-4. （v1.1新增）按采购类型过滤
+3. **v1.2新增**：连续性追踪（追踪多页证明材料）
+4. **v1.2新增**：停止条件检测（遇到新评分项标题停止）
+5. **v1.2新增**：人员信息特征检测（检测多人列表）
+6. 合并完整范围
+7. （v1.1新增）按采购类型过滤
 
 ### 扩展检索 API
 
@@ -310,8 +348,8 @@ result = discovery.discover_from_summaries(
 ```
 pageindex/
 ├── page_index.py           # 树结构索引
-├── vision_pageindex.py     # 视觉检索 + Agent（v1.1 支持类型参数）
-├── procurement_knowledge.py # 评分项知识库（v1.1 类型分类 + 权重配置）
+├── vision_pageindex.py     # 视觉检索 + Agent（v1.2 连续性追踪 + 人员信息检测）
+├── procurement_knowledge.py # 评分项知识库（v1.2 关键词分层 + 双向扩展配置）
 ├── procurement_kb_builder.py # 知识库构建工具
 ├── client.py               # API 客户端
 ├── retrieve.py             # 检索函数
@@ -329,6 +367,7 @@ examples/
 tests/
 ├── test_procurement_kb.py       # 知识库测试
 ├── test_procurement_type.py     # v1.1 类型分类测试（62个）
+├── test_multi_page_material.py  # v1.2 多页材料追踪测试
 ```
 
 ## 常见问题
@@ -386,6 +425,37 @@ enricher.add_material_type(
 )
 ```
 
+### Q: 为什么合同条款页漏检？（v1.2修复）
+
+A: 合同条款页摘要不含"政府采购合同"等首页关键词。v1.2 引入：
+- **连续性追踪**：追踪 `multi_page=True` 的证明材料后续页面
+- **弱关键词匹配**：在追踪时匹配"条款"、"违约责任"等弱关键词
+
+### Q: 为什么业绩材料只检测到部分页面？（v1.2修复）
+
+A: 原 `max_pages=20` 限制不够。v1.2 增大到 50，并实现停止条件检测：
+- 扩展范围：`max_pages: 50`
+- 停止条件：遇到新评分项标题（如"人员配备"、"设备能力"）自动停止
+
+### Q: 为什么证明材料在标题页之前无法检测？（v1.2修复）
+
+A: 原只支持 `forward` 向后搜索。v1.2 新增 `bidirectional` 双向搜索：
+```python
+"page_expansion_rule": {
+    "direction": "bidirectional",
+    "max_pages": 15,
+    "backward_pages": 10  // 向前扩展10页
+}
+```
+
+### Q: 如何让"操作手合格证"页面直接作为标题页？（v1.2新增）
+
+A: 配置 `material_as_title_keywords`：
+```python
+"material_as_title_keywords": ["操作手合格证", "植保无人机操作证"]
+```
+这些关键词匹配的页面既可作为标题页入口，也自动识别为证明材料页。
+
 ## 相关文档
 
 - [视觉检索使用指南](docs/VISION_PAGEINDEX_USAGE.md)
@@ -398,3 +468,4 @@ enricher.add_material_type(
 **版本记录：**
 - v1.0: 基础知识库（9种评分项）
 - v1.1: 类型分类 + 权重差异化 + 政策性评分项（2026-04-17）
+- v1.2: 证明材料页漏检修复 + 连续性追踪 + 双向搜索 + 人员信息特征检测（2026-04-18）

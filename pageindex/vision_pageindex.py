@@ -32,7 +32,7 @@ import base64
 import asyncio
 import concurrent.futures
 from pathlib import Path
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Tuple
 import logging
 
 import litellm
@@ -848,6 +848,136 @@ class VisionPageIndexClient(PageIndexClient):
 
         return get_page_images_for_range(page_images, pages)
 
+    def _should_continue_material(
+        self,
+        page_num: int,
+        material_type: str,
+        last_material_page: int,
+        page_summaries: Dict,
+        kb_config: Dict,
+        intent: Dict,
+        requirement_type: str = None,
+        kb: ProcurementKnowledgeBase = None
+    ) -> bool:
+        """
+        判断页面是否属于连续的多页证明材料
+
+        用于追踪合同条款页等不包含首页关键词但属于同一材料的页面。
+
+        Args:
+            page_num: 待判断的页面号
+            material_type: 材料类型（如"合同"、"中标通知"）
+            last_material_page: 上一个材料页的页码
+            page_summaries: 页面摘要字典
+            kb_config: 知识库配置
+            intent: 查询意图（包含排除关键词等）
+            requirement_type: 当前评分项类型（用于停止条件检测）
+            kb: 知识库实例（用于获取其他评分项标题关键词）
+
+        Returns:
+            bool: 是否应该继续追踪该页面
+        """
+        summary = page_summaries.get(page_num, "")
+
+        # 1. 检查停止条件：是否出现新评分项标题
+        # 这是停止条件的核心逻辑：当遇到其他评分项的标题时停止追踪
+        # 但需要排除误匹配：合同条款页中出现的评分项关键词不应触发停止
+        if kb and requirement_type:
+            other_title_keywords = kb.get_all_title_keywords(exclude_type=requirement_type)
+            for kw in other_title_keywords:
+                if kw in summary:
+                    # 检查是否是误匹配：页面是否同时包含合同上下文关键词
+                    is_false_positive = False
+                    contract_context_keywords = [
+                        "合同的", "合同规定", "飞防作业", "药剂", "配方",
+                        "验收合格", "结算方式", "付款", "乙方", "甲方",
+                        "违约责任", "义务", "签约", "生效", "条款"
+                    ]
+                    for cck in contract_context_keywords:
+                        if cck in summary:
+                            is_false_positive = True
+                            break
+
+                    if not is_false_positive:
+                        logger.info(f"停止追踪: 第{page_num}页包含新评分项标题 '{kw}'")
+                        return False
+
+        # 2. 检查排除条件：是否包含偏离表等排除词
+        exclude_keywords = intent.get('exclude_keywords', [])
+        for ex_kw in exclude_keywords:
+            if ex_kw in summary:
+                return False
+
+        # 3. 检查弱关键词：合同条款页常见词汇
+        # 从知识库配置中获取弱关键词
+        mat_config = kb_config.get(material_type, {})
+        weak_keywords_list = mat_config.get('weak_keywords', [])
+
+        # 如果知识库未定义弱关键词，使用默认列表
+        if not weak_keywords_list:
+            weak_keywords_list = {
+                "合同": ["条款", "约定", "附件", "权利义务", "违约", "付款", "结算", "签署", "生效", "知识产权", "质量保证", "服务内容"],
+                "中标通知": [],
+                "验收报告": ["验收", "结论", "意见"],
+                "发票": ["发票", "金额", "税额"],
+            }.get(material_type, [])
+
+        for kw in weak_keywords_list:
+            if kw in summary:
+                return True
+
+        # 3. 检查页面连续性：与上一页相邻
+        # 如果页面紧邻上一个材料页，且没有明显的停止标志，则默认属于同一材料
+        if page_num == last_material_page + 1:
+            # 检查摘要中是否包含"合同"、"条款"等弱关联词
+            if "合同" in summary or "条款" in summary or "约定" in summary:
+                return True
+            # 如果摘要描述的是法律条款、权利义务等内容，大概率是合同条款页
+            if any(word in summary for word in ["责任", "义务", "权利", "期限", "方式", "标准", "条件", "违约", "争议", "变更", "终止", "转让"]):
+                return True
+
+        return False
+
+    def _check_person_info_pattern(self, summary: str, pattern: Dict) -> Tuple[bool, Dict]:
+        """
+        v1.2新增：检测页面是否包含人员信息特征（多人列表）
+
+        这是更本质的判断方式：人员证明材料页面通常包含多个人的个人信息，
+        如姓名、性别、出生日期等。适用于操作证、培训证、职称证等各类证件。
+
+        Args:
+            summary: 页面摘要
+            pattern: 人员信息特征配置
+
+        Returns:
+            (是否匹配, 匹配详情)
+        """
+        if not pattern:
+            return False, {}
+
+        core_fields = pattern.get('core_fields', ["姓名", "性别", "出生日期"])
+        optional_fields = pattern.get('optional_fields', [])
+        multi_person_indicators = pattern.get('multi_person_indicators', ["位人员", "张证书", "人员名单", "共"])
+        min_field_count = pattern.get('min_field_count', 2)
+
+        # 检查核心字段匹配数量
+        matched_core = [f for f in core_fields if f in summary]
+        matched_optional = [f for f in optional_fields if f in summary]
+
+        # 检查多人列表标志
+        matched_multi = [m for m in multi_person_indicators if m in summary]
+
+        # 判断是否匹配：至少匹配 min_field_count 个核心字段
+        is_match = len(matched_core) >= min_field_count
+
+        return is_match, {
+            'matched_core_fields': matched_core,
+            'matched_optional_fields': matched_optional,
+            'matched_multi_indicators': matched_multi,
+            'is_multi_person': len(matched_multi) > 0,
+            'field_count': len(matched_core),
+        }
+
     def retrieve_with_expansion(
         self,
         doc_id: str,
@@ -916,6 +1046,8 @@ class VisionPageIndexClient(PageIndexClient):
         intent = kb.parse_intent(query, procurement_type=proc_type_enum)
         requirement_type = intent.get('requirement_type')
         title_keywords = intent.get('title_keywords', [])
+        material_as_title_keywords = intent.get('material_as_title_keywords', [])  # v1.2新增
+        person_info_pattern = intent.get('person_info_pattern', {})  # v1.2新增：人员信息特征检测
         material_types = intent.get('material_types', {})
         expansion_rule = intent.get('page_expansion_rule', {})
         confidence = intent.get('confidence', 0)
@@ -923,8 +1055,10 @@ class VisionPageIndexClient(PageIndexClient):
         logger.info(f"意图解析: requirement_type={requirement_type}, procurement_type={procurement_type}, confidence={confidence}")
 
         # Step 2: 定位标题页（优先精确匹配，排除汇总表）
-        title_pages = []
+        title_pages = []  # 真正的章节标题页
         title_page_scores = {}  # 记录每个标题页的匹配分数
+        material_title_pages = []  # v1.2新增：证明材料标题页（如操作证首页）
+        material_title_scores = {}  # v1.2新增：证明材料标题页分数
 
         # 获取排除词列表
         exclude_keywords = intent.get('exclude_keywords', [])
@@ -942,22 +1076,55 @@ class VisionPageIndexClient(PageIndexClient):
                 continue
 
             # 检查摘要是否包含标题关键词
-            match_count = 0
+            title_match_count = 0  # v1.2改进：章节标题关键词匹配数
+            material_match_count = 0  # v1.2改进：证明材料标题关键词匹配数
             exact_match = False  # 是否有与查询词完全匹配的关键词
+            title_at_start = False  # v1.2：关键词是否出现在摘要开头（真正的章节标题）
+            material_at_start = False  # v1.2新增：证明材料关键词是否在开头
             matched_keywords = []
+            material_keywords_matched = []  # v1.2新增：匹配的证明材料关键词
+            summary_start = summary[:80]  # 检查摘要前80字符
+
+            # 检查普通标题关键词（真正的章节标题）
+            title_match_count = 0
             for kw in title_keywords:
                 if kw in summary:
-                    match_count += 1
+                    title_match_count += 1
                     matched_keywords.append(kw)
-                    # 检查是否精确匹配查询词
                     if kw == query or query in kw:
                         exact_match = True
+                    if kw in summary_start:
+                        title_at_start = True
 
-            if match_count > 0:
+            # v1.2新增：检查"证明材料作为标题"的关键词（单独处理）
+            material_match_count = 0
+            for kw in material_as_title_keywords:
+                if kw in summary:
+                    material_match_count += 1
+                    material_keywords_matched.append(kw)
+                    if kw in summary_start:
+                        material_at_start = True
+
+            # v1.2改进：分离章节标题页和证明材料标题页
+            # 真正的章节标题页（包含 title_keywords）参与主要标题页竞选
+            if title_match_count > 0:
                 title_pages.append(page)
-                # 精确匹配得分更高
-                title_page_scores[page] = match_count + (10 if exact_match else 0)
-                logger.info(f"发现标题页: 第{page}页 (关键词: {matched_keywords}, 精确匹配: {exact_match})")
+                # 真正的章节标题得分：标题开头匹配 > 精确匹配 > 关键词数量
+                base_score = title_match_count
+                if title_at_start:
+                    base_score += 30  # 标题开头匹配，+30分（真正的章节标题）
+                if exact_match and not title_at_start:
+                    base_score += 15  # 精确匹配但不在开头，+15分
+                title_page_scores[page] = base_score
+                logger.info(f"发现章节标题页: 第{page}页 (关键词: {matched_keywords}, 精确匹配: {exact_match}, 标题开头: {title_at_start})")
+
+            # v1.2新增：证明材料标题页单独标记（不与章节标题页竞争）
+            # 这些页面是证明材料页面（如操作证首页），不是章节标题页
+            if material_match_count > 0 and title_match_count == 0:
+                material_title_pages.append(page)
+                base_score = material_match_count + (25 if material_at_start else 0)
+                material_title_scores[page] = base_score
+                logger.info(f"发现证明材料标题页: 第{page}页 (关键词: {material_keywords_matched}, 标题开头: {material_at_start})")
 
         if not title_pages:
             # 没有找到标题页，尝试用原始查询词搜索（仍需排除排除词）
@@ -976,14 +1143,59 @@ class VisionPageIndexClient(PageIndexClient):
                     title_page_scores[page] = 11  # 给予较高分数
                     logger.info(f"用查询词定位: 第{page}页")
 
-        # 选择最相关的标题页进行扩展（匹配分数最高的）
-        primary_title_page = max(title_page_scores, key=title_page_scores.get) if title_page_scores else None
-        logger.info(f"主要标题页: {primary_title_page} (分数: {title_page_scores.get(primary_title_page)})")
+        # v1.2改进：优先选择章节标题页作为主要标题页
+        # 真正的章节标题（如"人员配备"、"类似业绩"）应该是主要标题页
+        # 证明材料标题页（如"操作手合格证"）只作为证明材料页
+        primary_title_page = None
+        if title_page_scores:
+            # 有章节标题页，选择分数最高的
+            primary_title_page = max(title_page_scores, key=title_page_scores.get)
+            logger.info(f"主要章节标题页: {primary_title_page} (分数: {title_page_scores.get(primary_title_page)})")
+        elif material_title_scores:
+            # 没有章节标题页，但有证明材料标题页，选择分数最高的作为入口
+            primary_title_page = max(material_title_scores, key=material_title_scores.get)
+            logger.info(f"无章节标题页，使用证明材料标题页作为入口: {primary_title_page} (分数: {material_title_scores.get(primary_title_page)})")
+        else:
+            logger.info(f"未找到标题页")
 
-        # Step 3: 扫描证明材料页（只对主要标题页进行扩展）
+        # Step 3: 扫描证明材料页（初始化）
         material_pages = []
         material_details = []
         seen_material_pages = set()  # 去重
+
+        # v1.2改进：处理证明材料标题页
+        # 当存在章节标题页时，证明材料标题页应该作为证明材料页而非主要标题页
+        if material_title_pages:
+            for page in material_title_pages:
+                if page != primary_title_page or not title_page_scores:  # 不是主要标题页，或者没有章节标题页
+                    seen_material_pages.add(page)
+                    material_pages.append(page)
+                    page_keywords = [kw for kw in material_as_title_keywords if kw in page_summaries.get(page, "")]
+                    material_details.append({
+                        'page': page,
+                        'material_type': '操作证',
+                        'matched_keywords': page_keywords,
+                        'description': '证明材料标题页',
+                    })
+                    logger.info(f"证明材料标题页识别为证明材料: 第{page}页")
+
+        # v1.2新增：如果主要标题页是"证明材料作为标题"类型（没有章节标题页），同时也识别为证明材料页
+        if primary_title_page and primary_title_page in material_title_pages and not title_page_scores:
+            # 主要标题页是证明材料标题页（作为入口）
+            seen_material_pages.add(primary_title_page)
+            if primary_title_page not in material_pages:  # 避免重复添加
+                material_pages.append(primary_title_page)
+                primary_keywords = [kw for kw in material_as_title_keywords if kw in page_summaries.get(primary_title_page, "")]
+                material_details.append({
+                    'page': primary_title_page,
+                    'material_type': '操作证',
+                    'matched_keywords': primary_keywords,
+                    'description': '证明材料标题页作为入口',
+                })
+                logger.info(f"主要标题页（证明材料入口）同时也是证明材料页: 第{primary_title_page}页")
+
+        # Step 3: 扫描证明材料页（只对主要标题页进行扩展）
+        # 变量已在上面初始化：material_pages, material_details, seen_material_pages
 
         # 获取所有证明材料关键词
         all_material_keywords = kb.get_material_keywords(requirement_type) if requirement_type != "unknown" else []
@@ -991,31 +1203,90 @@ class VisionPageIndexClient(PageIndexClient):
         # 获取扩展规则
         direction = expansion_rule.get('direction', 'forward')
         max_expansion = expansion_rule.get('max_pages', 5)
+        backward_pages = expansion_rule.get('backward_pages', max_expansion)  # v1.2：向前扩展页数
 
         # 只对主要标题页进行扩展扫描（避免误扩展到其他评分项）
         scan_targets = [primary_title_page] if primary_title_page else []
 
         for title_page in scan_targets:
             # 根据方向决定扫描范围
+            scan_ranges = []  # v1.2：支持多个扫描范围（双向搜索）
+
             if direction == 'forward':
-                scan_start = title_page + 1
-                scan_end = min(title_page + max_expansion + 1, max_page + 1)
+                scan_ranges.append((title_page + 1, min(title_page + max_expansion + 1, max_page + 1)))
             elif direction == 'backward':
-                scan_start = max(1, title_page - max_expansion)
-                scan_end = title_page
+                scan_ranges.append((max(1, title_page - max_expansion), title_page))
+            elif direction == 'bidirectional':
+                # v1.2新增：双向搜索，先向后扫描，再向前扫描
+                scan_ranges.append((title_page + 1, min(title_page + max_expansion + 1, max_page + 1)))
+                scan_ranges.append((max(1, title_page - backward_pages), title_page))
             elif direction == 'section':
                 # 整个部分，扫描更广范围
-                scan_start = title_page + 1
-                scan_end = min(title_page + max_expansion + 1, max_page + 1)
+                scan_ranges.append((title_page + 1, min(title_page + max_expansion + 1, max_page + 1)))
             else:
                 continue
 
-            # 扫描后续页面
-            for scan_page in range(scan_start, scan_end):
-                if scan_page not in page_summaries or scan_page in seen_material_pages:
-                    continue
+            # 扫描所有范围
+            for scan_start, scan_end in scan_ranges:
+                # 扫描范围内的页面
+                for scan_page in range(scan_start, scan_end):
+                    if scan_page not in page_summaries or scan_page in seen_material_pages:
+                        continue
 
-                scan_summary = page_summaries[scan_page]
+                    scan_summary = page_summaries[scan_page]
+
+                # v1.2新增：检查停止条件 - 是否遇到新评分项标题
+                # 发现新评分项标题时，跳过当前页面（不作为证明材料）
+                # 但需要排除"误匹配"：如果页面同时包含合同/中标通知等强关键词，说明是证明材料而非新章节
+                should_skip = False
+                if kb and requirement_type and requirement_type != "unknown":
+                    other_title_keywords = kb.get_all_title_keywords(exclude_type=requirement_type)
+                    for kw in other_title_keywords:
+                        if kw in scan_summary:
+                            # 检查是否是误匹配：页面是否同时包含证明材料强关键词
+                            is_false_positive = False
+                            # 检查合同强关键词（包括合同首页和合同条款关键词）
+                            contract_keywords = [
+                                "政府采购合同", "服务合同", "采购合同", "合同书", "协议书",
+                                "补助协议", "采购协议", "服务协议", "飞防合同", "作业合同",
+                                "防控合同", "合同条款", "合同附件"
+                            ]
+                            for ck in contract_keywords:
+                                if ck in scan_summary:
+                                    is_false_positive = True
+                                    break
+                            # 检查合同上下文关键词（合同条款页常见词汇）
+                            # 这些词出现在合同条款页中，不应触发停止条件
+                            if not is_false_positive:
+                                contract_context_keywords = [
+                                    "合同的", "合同规定", "飞防作业", "药剂", "配方",
+                                    "验收合格", "结算方式", "付款", "乙方", "甲方",
+                                    "违约责任", "义务", "签约", "生效"
+                                ]
+                                for cck in contract_context_keywords:
+                                    if cck in scan_summary:
+                                        is_false_positive = True
+                                        break
+                            # 检查中标通知强关键词
+                            bid_keywords = ["中标通知书", "成交通知书", "中标公告", "成交公告"]
+                            for bk in bid_keywords:
+                                if bk in scan_summary:
+                                    is_false_positive = True
+                                    break
+                            # 检查验收报告强关键词
+                            acceptance_keywords = ["验收报告", "验收证明", "竣工验收"]
+                            for ak in acceptance_keywords:
+                                if ak in scan_summary:
+                                    is_false_positive = True
+                                    break
+
+                            if not is_false_positive:
+                                logger.info(f"跳过页面: 第{scan_page}页包含新评分项标题 '{kw}'")
+                                should_skip = True
+                                break
+
+                if should_skip:
+                    continue  # 跳过当前页面，继续扫描后续页面
 
                 # 检查是否为证明材料
                 if requirement_type != "unknown":
@@ -1030,6 +1301,70 @@ class VisionPageIndexClient(PageIndexClient):
                             'description': mat_result.get('description', ''),
                         })
                         logger.info(f"发现证明材料页: 第{scan_page}页 ({mat_result['material_type']})")
+
+                        # v1.2新增：多页材料连续性追踪
+                        # 如果材料类型标记为多页，追踪后续相邻页面
+                        mat_config = material_types.get(mat_result['material_type'], {})
+                        if mat_config.get('multi_page', False):
+                            trace_page = scan_page + 1
+                            while trace_page < scan_end and trace_page not in seen_material_pages:
+                                trace_summary = page_summaries.get(trace_page, "")
+                                if self._should_continue_material(
+                                    trace_page,
+                                    mat_result['material_type'],
+                                    trace_page - 1,  # last_material_page
+                                    page_summaries,
+                                    material_types,
+                                    intent,
+                                    requirement_type,  # 新增：当前评分项类型
+                                    kb  # 新增：知识库实例
+                                ):
+                                    seen_material_pages.add(trace_page)
+                                    material_pages.append(trace_page)
+                                    material_details.append({
+                                        'page': trace_page,
+                                        'material_type': mat_result['material_type'],
+                                        'matched_keywords': ['连续追踪'],
+                                        'description': f'{mat_result["material_type"]}条款页',
+                                    })
+                                    logger.info(f"追踪证明材料页: 第{trace_page}页 ({mat_result['material_type']}条款页)")
+                                    trace_page += 1
+                                else:
+                                    break
+
+                    # v1.2新增：人员信息特征检测（更本质的判断方式）
+                    # 如果关键词匹配失败，但页面包含多人个人信息，也识别为证明材料
+                    elif person_info_pattern and requirement_type in ["人员配备", "人员配置", "作业人员"]:
+                        person_match, person_details = self._check_person_info_pattern(scan_summary, person_info_pattern)
+                        if person_match:
+                            seen_material_pages.add(scan_page)
+                            material_pages.append(scan_page)
+                            material_details.append({
+                                'page': scan_page,
+                                'material_type': '人员证明材料',
+                                'matched_keywords': person_details.get('matched_core_fields', []),
+                                'description': f'人员信息特征检测: {person_details}',
+                            })
+                            logger.info(f"发现人员证明材料页: 第{scan_page}页 (人员信息特征: {person_details})")
+
+                            # 人员证明材料通常也是多页，追踪后续页面
+                            trace_page = scan_page + 1
+                            while trace_page < scan_end and trace_page not in seen_material_pages:
+                                trace_summary = page_summaries.get(trace_page, "")
+                                trace_match, trace_details = self._check_person_info_pattern(trace_summary, person_info_pattern)
+                                if trace_match:
+                                    seen_material_pages.add(trace_page)
+                                    material_pages.append(trace_page)
+                                    material_details.append({
+                                        'page': trace_page,
+                                        'material_type': '人员证明材料',
+                                        'matched_keywords': trace_details.get('matched_core_fields', []),
+                                        'description': f'连续人员信息页: {trace_details}',
+                                    })
+                                    logger.info(f"追踪人员证明材料页: 第{trace_page}页 (人员信息特征: {trace_details})")
+                                    trace_page += 1
+                                else:
+                                    break
                 else:
                     # 使用通用关键词检测
                     for kw in all_material_keywords:
