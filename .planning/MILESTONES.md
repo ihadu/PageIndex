@@ -49,7 +49,30 @@
 
 ---
 
-## v1.2 — 规划中
+## v1.2 — 证明材料页漏检修复
+
+**Status:** ✓ Complete (Archived)
+**Date:** 2026-04-18
+**Archive:** `.planning/milestones/v1.2-ROADMAP.md`, `.planning/milestones/v1.2-REQUIREMENTS.md`
+
+### Shipped
+
+- **连续性追踪**: `_should_continue_material()` 追踪多页证明材料
+- **关键词分层**: 强关键词单独触发 + 弱关键词追踪
+- **停止条件检测**: 遇到新评分项标题自动停止
+- **双向搜索**: bidirectional 模式支持向前搜索
+- **人员信息特征检测**: person_info_pattern 检测多人列表
+- **扩展范围增大**: max_pages 从 20 增加到 50
+
+### Stats
+
+- 新增代码: 495 lines
+- 修复问题: 4 个（合同条款页漏检、业绩页数限制、证明材料在标题前、误触发停止）
+- Git range: 624296b → af0231a
+
+---
+
+## v1.3 — 规划中
 
 **Status:** 📋 Planned
 

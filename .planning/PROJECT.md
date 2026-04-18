@@ -10,18 +10,11 @@ PageIndex 是一个**向量无关、基于推理的 RAG 系统**，专门用于�
 
 **让评审专家快速定位评分项页码**——这是政府采购评审效率提升的关键需求。
 
-## Current Milestone: v1.2 证明材料页漏检修复
+## Current Milestone: v1.3 规划中
 
-**Goal:** 修复证明材料页漏检问题，实现连续性追踪、双向搜索、人员信息特征检测
+**Goal:** 待规划（可能的候选：绿色产品认证、地区知识库、有效性检测）
 
-**Target features:**
-- 连续性追踪：追踪多页证明材料（合同条款页等）
-- 关键词分层：强关键词单独触发 + 弱关键词追踪使用
-- 停止条件检测：遇到新评分项标题自动停止
-- 双向搜索：bidirectional 模式支持向前搜索
-- 人员信息特征检测：person_info_pattern 检测多人列表
-
-**预估时间:** 1周（已提交代码，待正式归档）
+**预估时间:** TBD
 
 ## Requirements
 
@@ -47,22 +40,21 @@ PageIndex 是一个**向量无关、基于推理的 RAG 系统**，专门用于�
 - ✓ **COMPAT-01**: API 向后兼容 — v1.1
 - ✓ **INT-01**: VisionPageIndex 类型参数 — v1.1
 
+**v1.2 证明材料页漏检修复：**
+- ✓ **连续性追踪** — `_should_continue_material()` 追踪多页证明材料 — v1.2
+- ✓ **关键词分层** — 强关键词单独触发 + 弱关键词追踪 — v1.2
+- ✓ **停止条件检测** — 遇到新评分项标题自动停止 — v1.2
+- ✓ **双向搜索** — bidirectional 模式支持向前搜索 — v1.2
+- ✓ **人员信息特征检测** — person_info_pattern 检测多人列表 — v1.2
+- ✓ **扩展范围增大** — max_pages 从 20 增加到 50 — v1.2
+
 ### Active
 
-<!-- v1.2 里程碑目标 -->
+<!-- v1.3 里程碑候选 -->
 
-- [x] **连续性追踪** — `_should_continue_material()` 追踪多页证明材料（已提交）
-- [x] **关键词分层** — 强关键词单独触发 + 弱关键词追踪（已提交）
-- [x] **停止条件检测** — 遇到新评分项标题自动停止（已提交）
-- [x] **双向搜索** — bidirectional 模式支持向前搜索（已提交）
-- [x] **人员信息特征检测** — person_info_pattern 检测多人列表（已提交）
-- [x] **扩展范围增大** — max_pages 从 20 增加到 50（已提交）
-
-### Deferred to v1.x
-
-- **POLICY-02 绿色产品认证** — 需品目清单数据库支持
-- **REGION-01 地区知识库差异化** — 各省采购规则差异
-- **VALID-01 证明材料有效性检测** — 证书有效期、公章检测
+- [ ] **POLICY-02**: 绿色产品认证（需品目清单数据库）
+- [ ] **REGION-01**: 地区知识库差异化（各省采购规则）
+- [ ] **VALID-01**: 证明材料有效性检测（证书有效期、公章）
 
 ### Out of Scope
 
@@ -138,4 +130,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-18 after v1.1 milestone archived*
+*Last updated: 2026-04-18 after v1.2 milestone archived*
