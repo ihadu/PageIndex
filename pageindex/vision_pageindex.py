@@ -452,7 +452,8 @@ class VisionPageIndexClient(PageIndexClient):
         self,
         pdf_path: str,
         output_dir: str = None,
-        force_reindex: bool = False
+        force_reindex: bool = False,
+        doc_id: str = None  # 新增：外部指定 doc_id
     ) -> str:
         """
         获取或创建索引（支持复用已有索引）
@@ -461,27 +462,29 @@ class VisionPageIndexClient(PageIndexClient):
             pdf_path: PDF文件路径
             output_dir: 图片输出目录
             force_reindex: 是否强制重新索引
+            doc_id: 指定文档ID（可选，默认自动生成UUID）
 
         Returns:
             文档ID
         """
         pdf_path = os.path.abspath(pdf_path)
 
-        # 检查已有索引
-        if not force_reindex:
+        # 检查已有索引（仅当未指定 doc_id 时）
+        if not force_reindex and doc_id is None:
             existing_doc_id = self.find_doc_by_path(pdf_path)
             if existing_doc_id:
                 logger.info(f"使用已有索引: doc_id={existing_doc_id}")
                 return existing_doc_id
 
         # 创建新索引
-        return self.index_scanned_pdf(pdf_path, output_dir)
+        return self.index_scanned_pdf(pdf_path, output_dir, doc_id=doc_id)
 
     def index_scanned_pdf(
         self,
         pdf_path: str,
         output_dir: str = None,
-        generate_summaries: bool = True
+        generate_summaries: bool = True,
+        doc_id: str = None  # 新增：外部指定 doc_id
     ) -> str:
         """
         索引扫描件PDF
@@ -490,6 +493,7 @@ class VisionPageIndexClient(PageIndexClient):
             pdf_path: PDF文件路径
             output_dir: 图片输出目录（默认为PDF同目录下的images文件夹）
             generate_summaries: 是否生成VLM摘要
+            doc_id: 指定文档ID（可选，默认自动生成UUID）
 
         Returns:
             文档ID
@@ -528,9 +532,11 @@ class VisionPageIndexClient(PageIndexClient):
         logger.info("构建文档树结构...")
         structure = self._build_structure_from_summaries(page_summaries)
 
-        # 生成文档ID
+        # 生成文档ID（使用外部传入或自动生成）
         import uuid
-        doc_id = str(uuid.uuid4())
+        if doc_id is None:
+            doc_id = str(uuid.uuid4())
+        logger.info(f"使用文档ID: {doc_id}")
 
         # 存储文档信息
         pdf_reader = None

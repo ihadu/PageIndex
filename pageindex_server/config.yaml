@@ -1,0 +1,19 @@
+# PageIndex HTTP 服务配置
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  max_concurrent_tasks: 5
+  task_queue_size: 10
+
+llm:
+  text_model: "qwen3.5-flash"
+  vision_model: "qwen3-vl-flash"
+  api_key: "${DASHSCOPE_API_KEY}"
+  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  timeout: 60
+  retry: 2
+
+workspace:
+  path: "./workspace"
+  auto_cleanup_days: 7
