@@ -9,8 +9,8 @@ Vision PageIndex - 扫描件PDF智能检索模块
 - Agent智能检索：OpenAI Agents SDK 多工具协作
 
 支持的模型：
-- qwen-plus: 阿里云通义千问文本模型
-- qwen-vl-plus: 阿里云通义千问视觉模型
+- qwen3.5-flash: 阿里云通义千问3文本模型（性价比高）
+- qwen3-vl-flash: 阿里云通义千问3视觉模型（性价比高）
 
 使用流程：
 1. PDF转图片 (extract_pdf_page_images)
@@ -63,18 +63,21 @@ logger = logging.getLogger(__name__)
 
 # ============== 配置 ==============
 
-# LiteLLM 模型名称映射
+# LiteLLM 模型名称映射（qwen3 系列，性价比更高）
 MODEL_MAPPING = {
-    "qwen-plus": "openai/qwen-plus",      # 通过 LiteLLM 调用阿里云
-    "qwen-vl-plus": "openai/qwen-vl-plus",  # 视觉模型
+    "qwen3.5-flash": "openai/qwen3.5-flash",      # 文本模型，输入0.2元/M，输出2元/M
+    "qwen3-vl-flash": "openai/qwen3-vl-flash",    # 视觉模型，输入0.15元/M，输出1.5元/M
+    # 旧模型映射（向后兼容）
+    "qwen-plus": "openai/qwen-plus",
+    "qwen-vl-plus": "openai/qwen-vl-plus",
 }
 
-# 默认配置
+# 默认配置（使用 qwen3 系列）
 DEFAULT_CONFIG = {
-    "text_model": "qwen-plus",
-    "vision_model": "qwen-vl-plus",
+    "text_model": "qwen3.5-flash",       # 文本模型（更便宜）
+    "vision_model": "qwen3-vl-flash",    # 视觉模型（更便宜）
     "image_zoom": 2.0,  # PDF转图片放大倍数
-    "max_images_per_query": 5,  # 单次查询最大图片数
+    "max_images_per_query": 0,  # 默认不调用VLM，仅返回页码范围
     "summary_max_length": 200,  # 摘要最大长度
 }
 
@@ -183,7 +186,7 @@ def encode_image_to_base64(image_path: str) -> str:
 async def call_vlm_async(
     prompt: str,
     image_paths: List[str] = None,
-    model: str = "qwen-vl-plus"
+    model: str = "qwen3-vl-flash"
 ) -> str:
     """
     异步调用VLM处理图片
@@ -233,7 +236,7 @@ async def call_vlm_async(
 def call_vlm(
     prompt: str,
     image_paths: List[str] = None,
-    model: str = "qwen-vl-plus"
+    model: str = "qwen3-vl-flash"
 ) -> str:
     """
     同步调用VLM处理图片
@@ -250,7 +253,7 @@ def call_vlm(
 
 async def generate_page_summary_with_vlm(
     image_path: str,
-    model: str = "qwen-vl-plus",
+    model: str = "qwen3-vl-flash",
     max_length: int = 200
 ) -> str:
     """
@@ -277,7 +280,7 @@ async def generate_page_summary_with_vlm(
 
 async def generate_page_summaries_batch(
     page_images: Dict[int, str],
-    model: str = "qwen-vl-plus",
+    model: str = "qwen3-vl-flash",
     max_length: int = 200,
     batch_size: int = 5
 ) -> Dict[int, str]:
@@ -329,8 +332,8 @@ class VisionPageIndexClient(PageIndexClient):
 
     Example:
         >>> client = VisionPageIndexClient(
-        ...     text_model="qwen-plus",
-        ...     vision_model="qwen-vl-plus"
+        ...     text_model="qwen3.5-flash",
+        ...     vision_model="qwen3-vl-flash"
         ... )
         >>> doc_id = client.index_scanned_pdf("扫描件.pdf")
         >>> result = client.retrieve_with_vlm(doc_id, "查找技术方案")
@@ -338,8 +341,8 @@ class VisionPageIndexClient(PageIndexClient):
 
     def __init__(
         self,
-        text_model: str = "qwen-plus",
-        vision_model: str = "qwen-vl-plus",
+        text_model: str = "qwen3.5-flash",
+        vision_model: str = "qwen3-vl-flash",
         api_key: str = None,
         base_url: str = None,
         workspace: str = None,
@@ -902,6 +905,21 @@ class VisionPageIndexClient(PageIndexClient):
                         logger.info(f"停止追踪: 第{page_num}页包含新评分项标题 '{kw}'")
                         return False
 
+        # v1.3修复：检查业绩材料类型间的衔接
+        # 业绩材料通常是连续出现：中标通知书 → 合同首页 → 合同条款页 → 验收报告
+        # 当追踪中标通知后续页面时，如果出现合同关键词，应继续追踪
+        performance_material_transitions = {
+            "中标通知": ["合同", "采购合同", "服务合同", "协议书", "政府采购合同"],
+            "合同": ["验收报告", "验收证明", "竣工验收", "验收结论"],
+            "验收报告": ["业绩证明函", "证明函", "业绩说明"],
+        }
+        if material_type in performance_material_transitions:
+            transition_keywords = performance_material_transitions[material_type]
+            for tk in transition_keywords:
+                if tk in summary:
+                    logger.info(f"材料衔接: 第{page_num}页检测到 '{tk}'，从{material_type}衔接到下一材料类型")
+                    return True
+
         # 2. 检查排除条件：是否包含偏离表等排除词
         exclude_keywords = intent.get('exclude_keywords', [])
         for ex_kw in exclude_keywords:
@@ -917,7 +935,7 @@ class VisionPageIndexClient(PageIndexClient):
         if not weak_keywords_list:
             weak_keywords_list = {
                 "合同": ["条款", "约定", "附件", "权利义务", "违约", "付款", "结算", "签署", "生效", "知识产权", "质量保证", "服务内容"],
-                "中标通知": [],
+                "中标通知": ["项目编号", "采购方式", "成交金额", "成交供应商", "签订合同", "中标金额"],  # v1.3修复
                 "验收报告": ["验收", "结论", "意见"],
                 "发票": ["发票", "金额", "税额"],
             }.get(material_type, [])
@@ -982,7 +1000,7 @@ class VisionPageIndexClient(PageIndexClient):
         self,
         doc_id: str,
         query: str,
-        max_images: int = 10,
+        max_images: int = 0,  # 默认不调用VLM，仅返回页码范围
         knowledge_base: ProcurementKnowledgeBase = None,
         procurement_type: str = None  # 新增：采购类型过滤
     ) -> Dict[str, Any]:
@@ -998,7 +1016,7 @@ class VisionPageIndexClient(PageIndexClient):
         Args:
             doc_id: 文档ID
             query: 用户查询（如"人员配备"、"类似业绩"）
-            max_images: 最大图片数（用于VLM处理）
+            max_images: 最大图片数（用于VLM处理），默认0=不调用VLM
             knowledge_base: 自定义知识库（默认使用内置）
             procurement_type: 采购类型过滤（可选）
                              None = 不过滤（默认）
@@ -1235,144 +1253,164 @@ class VisionPageIndexClient(PageIndexClient):
 
                     scan_summary = page_summaries[scan_page]
 
-                # v1.2新增：检查停止条件 - 是否遇到新评分项标题
-                # 发现新评分项标题时，跳过当前页面（不作为证明材料）
-                # 但需要排除"误匹配"：如果页面同时包含合同/中标通知等强关键词，说明是证明材料而非新章节
-                should_skip = False
-                if kb and requirement_type and requirement_type != "unknown":
-                    other_title_keywords = kb.get_all_title_keywords(exclude_type=requirement_type)
-                    for kw in other_title_keywords:
-                        if kw in scan_summary:
-                            # 检查是否是误匹配：页面是否同时包含证明材料强关键词
-                            is_false_positive = False
-                            # 检查合同强关键词（包括合同首页和合同条款关键词）
-                            contract_keywords = [
-                                "政府采购合同", "服务合同", "采购合同", "合同书", "协议书",
-                                "补助协议", "采购协议", "服务协议", "飞防合同", "作业合同",
-                                "防控合同", "合同条款", "合同附件"
-                            ]
-                            for ck in contract_keywords:
-                                if ck in scan_summary:
-                                    is_false_positive = True
-                                    break
-                            # 检查合同上下文关键词（合同条款页常见词汇）
-                            # 这些词出现在合同条款页中，不应触发停止条件
-                            if not is_false_positive:
-                                contract_context_keywords = [
-                                    "合同的", "合同规定", "飞防作业", "药剂", "配方",
-                                    "验收合格", "结算方式", "付款", "乙方", "甲方",
-                                    "违约责任", "义务", "签约", "生效"
+                    # v1.2新增：检查停止条件 - 是否遇到新评分项标题
+                    # 发现新评分项标题时，跳过当前页面（不作为证明材料）
+                    # 但需要排除"误匹配"：如果页面同时包含合同/中标通知等强关键词，说明是证明材料而非新章节
+                    should_skip = False
+                    if kb and requirement_type and requirement_type != "unknown":
+                        other_title_keywords = kb.get_all_title_keywords(exclude_type=requirement_type)
+                        for kw in other_title_keywords:
+                            if kw in scan_summary:
+                                # 检查是否是误匹配：页面是否同时包含证明材料强关键词
+                                is_false_positive = False
+                                # 检查合同强关键词（包括合同首页和合同条款关键词）
+                                contract_keywords = [
+                                    "政府采购合同", "服务合同", "采购合同", "合同书", "协议书",
+                                    "补助协议", "采购协议", "服务协议", "飞防合同", "作业合同",
+                                    "防控合同", "合同条款", "合同附件"
                                 ]
-                                for cck in contract_context_keywords:
-                                    if cck in scan_summary:
+                                for ck in contract_keywords:
+                                    if ck in scan_summary:
                                         is_false_positive = True
                                         break
-                            # 检查中标通知强关键词
-                            bid_keywords = ["中标通知书", "成交通知书", "中标公告", "成交公告"]
-                            for bk in bid_keywords:
-                                if bk in scan_summary:
-                                    is_false_positive = True
-                                    break
-                            # 检查验收报告强关键词
-                            acceptance_keywords = ["验收报告", "验收证明", "竣工验收"]
-                            for ak in acceptance_keywords:
-                                if ak in scan_summary:
-                                    is_false_positive = True
-                                    break
+                                # 检查合同上下文关键词（合同条款页常见词汇）
+                                # 这些词出现在合同条款页中，不应触发停止条件
+                                if not is_false_positive:
+                                    contract_context_keywords = [
+                                        "合同的", "合同规定", "飞防作业", "药剂", "配方",
+                                        "验收合格", "结算方式", "付款", "乙方", "甲方",
+                                        "违约责任", "义务", "签约", "生效"
+                                    ]
+                                    for cck in contract_context_keywords:
+                                        if cck in scan_summary:
+                                            is_false_positive = True
+                                            break
+                                # 检查中标通知强关键词
+                                bid_keywords = ["中标通知书", "成交通知书", "中标公告", "成交公告"]
+                                for bk in bid_keywords:
+                                    if bk in scan_summary:
+                                        is_false_positive = True
+                                        break
+                                # 检查验收报告强关键词
+                                acceptance_keywords = ["验收报告", "验收证明", "竣工验收"]
+                                for ak in acceptance_keywords:
+                                    if ak in scan_summary:
+                                        is_false_positive = True
+                                        break
 
-                            if not is_false_positive:
-                                logger.info(f"跳过页面: 第{scan_page}页包含新评分项标题 '{kw}'")
-                                should_skip = True
-                                break
+                                # v1.3修复：检查业绩材料通用上下文关键词
+                                # 这些词出现在业绩材料（中标通知、合同、验收报告）页面中
+                                # 不应因包含其他评分项关键词而触发停止条件
+                                if not is_false_positive:
+                                    performance_material_context_keywords = [
+                                        # 项目基本信息关键词
+                                        "项目名称", "采购人", "供应商", "合同编号", "签订日期",
+                                        "成交金额", "中标金额", "服务期限", "项目地点",
+                                        # 合同签署相关
+                                        "甲方", "乙方", "法定代表人", "委托代理人", "开户银行",
+                                        # 验收相关
+                                        "验收合格", "防治效果", "作业面积", "验收结论",
+                                        # 业绩证明相关
+                                        "业绩证明函", "证明函", "业绩说明", "业主证明",
+                                    ]
+                                    for pmc in performance_material_context_keywords:
+                                        if pmc in scan_summary:
+                                            is_false_positive = True
+                                            break
 
-                if should_skip:
-                    continue  # 跳过当前页面，继续扫描后续页面
-
-                # 检查是否为证明材料
-                if requirement_type != "unknown":
-                    mat_result = kb.check_page_is_material(scan_summary, requirement_type)
-                    if mat_result['is_material']:
-                        seen_material_pages.add(scan_page)
-                        material_pages.append(scan_page)
-                        material_details.append({
-                            'page': scan_page,
-                            'material_type': mat_result['material_type'],
-                            'matched_keywords': mat_result['matched_keywords'],
-                            'description': mat_result.get('description', ''),
-                        })
-                        logger.info(f"发现证明材料页: 第{scan_page}页 ({mat_result['material_type']})")
-
-                        # v1.2新增：多页材料连续性追踪
-                        # 如果材料类型标记为多页，追踪后续相邻页面
-                        mat_config = material_types.get(mat_result['material_type'], {})
-                        if mat_config.get('multi_page', False):
-                            trace_page = scan_page + 1
-                            while trace_page < scan_end and trace_page not in seen_material_pages:
-                                trace_summary = page_summaries.get(trace_page, "")
-                                if self._should_continue_material(
-                                    trace_page,
-                                    mat_result['material_type'],
-                                    trace_page - 1,  # last_material_page
-                                    page_summaries,
-                                    material_types,
-                                    intent,
-                                    requirement_type,  # 新增：当前评分项类型
-                                    kb  # 新增：知识库实例
-                                ):
-                                    seen_material_pages.add(trace_page)
-                                    material_pages.append(trace_page)
-                                    material_details.append({
-                                        'page': trace_page,
-                                        'material_type': mat_result['material_type'],
-                                        'matched_keywords': ['连续追踪'],
-                                        'description': f'{mat_result["material_type"]}条款页',
-                                    })
-                                    logger.info(f"追踪证明材料页: 第{trace_page}页 ({mat_result['material_type']}条款页)")
-                                    trace_page += 1
-                                else:
+                                if not is_false_positive:
+                                    logger.info(f"跳过页面: 第{scan_page}页包含新评分项标题 '{kw}'")
+                                    should_skip = True
                                     break
 
-                    # v1.2新增：人员信息特征检测（更本质的判断方式）
-                    # 如果关键词匹配失败，但页面包含多人个人信息，也识别为证明材料
-                    elif person_info_pattern and requirement_type in ["人员配备", "人员配置", "作业人员"]:
-                        person_match, person_details = self._check_person_info_pattern(scan_summary, person_info_pattern)
-                        if person_match:
+                    if should_skip:
+                        continue  # 跳过当前页面，继续扫描后续页面
+
+                    # 检查是否为证明材料
+                    if requirement_type != "unknown":
+                        mat_result = kb.check_page_is_material(scan_summary, requirement_type)
+                        if mat_result['is_material']:
                             seen_material_pages.add(scan_page)
                             material_pages.append(scan_page)
                             material_details.append({
                                 'page': scan_page,
-                                'material_type': '人员证明材料',
-                                'matched_keywords': person_details.get('matched_core_fields', []),
-                                'description': f'人员信息特征检测: {person_details}',
+                                'material_type': mat_result['material_type'],
+                                'matched_keywords': mat_result['matched_keywords'],
+                                'description': mat_result.get('description', ''),
                             })
-                            logger.info(f"发现人员证明材料页: 第{scan_page}页 (人员信息特征: {person_details})")
+                            logger.info(f"发现证明材料页: 第{scan_page}页 ({mat_result['material_type']})")
 
-                            # 人员证明材料通常也是多页，追踪后续页面
-                            trace_page = scan_page + 1
-                            while trace_page < scan_end and trace_page not in seen_material_pages:
-                                trace_summary = page_summaries.get(trace_page, "")
-                                trace_match, trace_details = self._check_person_info_pattern(trace_summary, person_info_pattern)
-                                if trace_match:
-                                    seen_material_pages.add(trace_page)
-                                    material_pages.append(trace_page)
-                                    material_details.append({
-                                        'page': trace_page,
-                                        'material_type': '人员证明材料',
-                                        'matched_keywords': trace_details.get('matched_core_fields', []),
-                                        'description': f'连续人员信息页: {trace_details}',
-                                    })
-                                    logger.info(f"追踪人员证明材料页: 第{trace_page}页 (人员信息特征: {trace_details})")
-                                    trace_page += 1
-                                else:
-                                    break
-                else:
-                    # 使用通用关键词检测
-                    for kw in all_material_keywords:
-                        if kw in scan_summary:
-                            seen_material_pages.add(scan_page)
-                            material_pages.append(scan_page)
-                            logger.info(f"发现证明材料页: 第{scan_page}页 (关键词: {kw})")
-                            break
+                            # v1.2新增：多页材料连续性追踪
+                            # 如果材料类型标记为多页，追踪后续相邻页面
+                            mat_config = material_types.get(mat_result['material_type'], {})
+                            if mat_config.get('multi_page', False):
+                                trace_page = scan_page + 1
+                                while trace_page < scan_end and trace_page not in seen_material_pages:
+                                    trace_summary = page_summaries.get(trace_page, "")
+                                    if self._should_continue_material(
+                                        trace_page,
+                                        mat_result['material_type'],
+                                        trace_page - 1,  # last_material_page
+                                        page_summaries,
+                                        material_types,
+                                        intent,
+                                        requirement_type,  # 新增：当前评分项类型
+                                        kb  # 新增：知识库实例
+                                    ):
+                                        seen_material_pages.add(trace_page)
+                                        material_pages.append(trace_page)
+                                        material_details.append({
+                                            'page': trace_page,
+                                            'material_type': mat_result['material_type'],
+                                            'matched_keywords': ['连续追踪'],
+                                            'description': f'{mat_result["material_type"]}条款页',
+                                        })
+                                        logger.info(f"追踪证明材料页: 第{trace_page}页 ({mat_result['material_type']}条款页)")
+                                        trace_page += 1
+                                    else:
+                                        break
+
+                        # v1.2新增：人员信息特征检测（更本质的判断方式）
+                        # 如果关键词匹配失败，但页面包含多人个人信息，也识别为证明材料
+                        elif person_info_pattern and requirement_type in ["人员配备", "人员配置", "作业人员"]:
+                            person_match, person_details = self._check_person_info_pattern(scan_summary, person_info_pattern)
+                            if person_match:
+                                seen_material_pages.add(scan_page)
+                                material_pages.append(scan_page)
+                                material_details.append({
+                                    'page': scan_page,
+                                    'material_type': '人员证明材料',
+                                    'matched_keywords': person_details.get('matched_core_fields', []),
+                                    'description': f'人员信息特征检测: {person_details}',
+                                })
+                                logger.info(f"发现人员证明材料页: 第{scan_page}页 (人员信息特征: {person_details})")
+
+                                # 人员证明材料通常也是多页，追踪后续页面
+                                trace_page = scan_page + 1
+                                while trace_page < scan_end and trace_page not in seen_material_pages:
+                                    trace_summary = page_summaries.get(trace_page, "")
+                                    trace_match, trace_details = self._check_person_info_pattern(trace_summary, person_info_pattern)
+                                    if trace_match:
+                                        seen_material_pages.add(trace_page)
+                                        material_pages.append(trace_page)
+                                        material_details.append({
+                                            'page': trace_page,
+                                            'material_type': '人员证明材料',
+                                            'matched_keywords': trace_details.get('matched_core_fields', []),
+                                            'description': f'连续人员信息页: {trace_details}',
+                                        })
+                                        logger.info(f"追踪人员证明材料页: 第{trace_page}页 (人员信息特征: {trace_details})")
+                                        trace_page += 1
+                                    else:
+                                        break
+                    else:
+                        # 使用通用关键词检测
+                        for kw in all_material_keywords:
+                            if kw in scan_summary:
+                                seen_material_pages.add(scan_page)
+                                material_pages.append(scan_page)
+                                logger.info(f"发现证明材料页: 第{scan_page}页 (关键词: {kw})")
+                                break
 
         # Step 4: 合并范围（只合并主要标题页及其证明材料页）
         # 将主要标题页添加到证明材料页列表的开头（如果不在）
@@ -1662,7 +1700,7 @@ def create_vision_agent_tools(
         except Exception as e:
             return json.dumps({'error': str(e)})
 
-    def retrieve_with_expansion(query: str, max_images: int = 10) -> str:
+    def retrieve_with_expansion(query: str, max_images: int = 0) -> str:
         """
         多轮扩展检索：自动识别评分项并合并标题页+证明材料页
 
@@ -1674,7 +1712,7 @@ def create_vision_agent_tools(
 
         Args:
             query: 用户查询，如"人员配备"、"类似业绩"、"技术方案"
-            max_images: 最大图片数量限制
+            max_images: 最大图片数量限制，默认0=不调用VLM（仅返回页码）
 
         Returns:
             JSON格式的检索结果，包含：
@@ -1682,7 +1720,7 @@ def create_vision_agent_tools(
             - primary_title_page: 主要标题页
             - material_pages: 证明材料页列表
             - page_ranges: 合并后的页码范围
-            - image_paths: 图片路径
+            - image_paths: 图片路径（max_images>0时返回）
         """
         try:
             result = client.retrieve_with_expansion(doc_id, query, max_images=max_images)
@@ -1841,8 +1879,8 @@ def create_vision_agent(
         return tools_dict['get_page_images'](pages)
 
     @function_tool
-    def retrieve_with_expansion(query: str, max_images: int = 10) -> str:
-        """多轮扩展检索：自动识别评分项类型并合并标题页+证明材料页。推荐用于采购文件检索，如查询'人员配备'会自动定位标题页并扫描后续的操作证、培训证明等证明材料页。参数: query-评分项关键词如'人员配备'、'类似业绩'，max_images-最大图片数"""
+    def retrieve_with_expansion(query: str, max_images: int = 0) -> str:
+        """多轮扩展检索：自动识别评分项类型并合并标题页+证明材料页。推荐用于采购文件检索，如查询'人员配备'会自动定位标题页并扫描后续的操作证、培训证明等证明材料页。参数: query-评分项关键词如'人员配备'、'类似业绩'，max_images-最大图片数（默认0=不调用VLM）"""
         return tools_dict['retrieve_with_expansion'](query, max_images)
 
     @function_tool
@@ -1923,7 +1961,7 @@ def create_vision_agent(
 async def answer_with_vlm(
     query: str,
     image_paths: List[str],
-    model: str = "qwen-vl-plus"
+    model: str = "qwen3-vl-flash"
 ) -> str:
     """
     使用VLM处理图片生成答案
@@ -1959,8 +1997,8 @@ def process_scanned_pdf_query(
     pdf_path: str,
     query: str,
     api_key: str = None,
-    text_model: str = "qwen-plus",
-    vision_model: str = "qwen-vl-plus"
+    text_model: str = "qwen3.5-flash",
+    vision_model: str = "qwen3-vl-flash"
 ) -> Dict[str, Any]:
     """
     一站式处理扫描件PDF查询

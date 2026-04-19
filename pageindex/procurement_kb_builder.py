@@ -63,7 +63,7 @@ class TenderParser:
         )
     """
 
-    def __init__(self, model: str = "qwen-plus"):
+    def __init__(self, model: str = "qwen3.5-flash"):
         self.model = model
 
     def extract_from_tender(
@@ -272,7 +272,7 @@ class KeywordDiscovery:
         )
     """
 
-    def __init__(self, kb: ProcurementKnowledgeBase, model: str = "qwen-plus"):
+    def __init__(self, kb: ProcurementKnowledgeBase, model: str = "qwen3.5-flash"):
         self.kb = kb
         self.model = model
 

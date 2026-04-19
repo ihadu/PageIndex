@@ -4,8 +4,8 @@
 演示如何使用 Vision PageIndex 处理扫描件PDF并进行智能检索。
 
 模型支持：
-- qwen-plus: 阿里云通义千问文本模型（用于推理）
-- qwen-vl-plus: 阿里云通义千问视觉模型（用于处理图片）
+- qwen3.5-flash: 阿里云通义千问3文本模型（用于推理，性价比高）
+- qwen3-vl-flash: 阿里云通义千问3视觉模型（用于处理图片，性价比高）
 
 前置条件：
 1. 安装依赖: pip install litellm pymupdf openai-agents
@@ -71,8 +71,8 @@ def example_basic_usage(pdf_path: str, query: str):
 
     # 初始化客户端
     client = VisionPageIndexClient(
-        text_model="qwen-plus",
-        vision_model="qwen-vl-plus",
+        text_model="qwen3.5-flash",
+        vision_model="qwen3-vl-flash",
         api_key=DASHSCOPE_API_KEY
     )
 
@@ -119,11 +119,11 @@ def example_step_by_step(pdf_path: str):
 
     # Step 2: VLM生成摘要
     print("\n📌 Step 2: VLM生成页面摘要")
-    print("   (使用 qwen-vl-plus 处理图片)")
+    print("   (使用 qwen3-vl-flash 处理图片)")
 
     summaries = asyncio.run(generate_page_summaries_batch(
         page_images,
-        model="qwen-vl-plus",
+        model="qwen3-vl-flash",
         max_length=200,
         batch_size=5
     ))
@@ -135,8 +135,8 @@ def example_step_by_step(pdf_path: str):
     # Step 3: 初始化客户端
     print("\n📌 Step 3: 初始化Vision客户端")
     client = VisionPageIndexClient(
-        text_model="qwen-plus",
-        vision_model="qwen-vl-plus",
+        text_model="qwen3.5-flash",
+        vision_model="qwen3-vl-flash",
         api_key=DASHSCOPE_API_KEY,
         workspace="./example_workspace"
     )
@@ -196,8 +196,8 @@ def example_agent_retrieval(pdf_path: str, query: str):
 
     # 初始化客户端
     client = VisionPageIndexClient(
-        text_model="qwen-plus",
-        vision_model="qwen-vl-plus",
+        text_model="qwen3.5-flash",
+        vision_model="qwen3-vl-flash",
         api_key=DASHSCOPE_API_KEY,
         workspace=workspace_dir  # 设置 workspace 以启用缓存
     )
@@ -257,8 +257,8 @@ def example_tools_based_retrieval(pdf_path: str, query: str):
 
     # 初始化客户端
     client = VisionPageIndexClient(
-        text_model="qwen-plus",
-        vision_model="qwen-vl-plus",
+        text_model="qwen3.5-flash",
+        vision_model="qwen3-vl-flash",
         api_key=DASHSCOPE_API_KEY
     )
 
@@ -323,8 +323,8 @@ def example_batch_retrieval(pdf_path: str, requirements_file: str = None):
 
     # 初始化客户端
     client = VisionPageIndexClient(
-        text_model="qwen-plus",
-        vision_model="qwen-vl-plus",
+        text_model="qwen3.5-flash",
+        vision_model="qwen3-vl-flash",
         api_key=DASHSCOPE_API_KEY
     )
 
@@ -382,9 +382,9 @@ def example_vlm_direct(image_dir: str, query: str):
 
     # 直接使用VLM处理
     print(f"\n🔍 查询: {query}")
-    print("   使用 qwen-vl-plus 直接处理图片...")
+    print("   使用 qwen3-vl-flash 直接处理图片...")
 
-    answer = asyncio.run(answer_with_vlm(query, image_paths[:5], "qwen-vl-plus"))
+    answer = asyncio.run(answer_with_vlm(query, image_paths[:5], "qwen3-vl-flash"))
 
     print(f"\n💡 答案:")
     print(answer)
